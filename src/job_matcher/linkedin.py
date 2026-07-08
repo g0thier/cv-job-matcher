@@ -25,6 +25,23 @@ from job_matcher.text_utils import (
 
 BASE_LINKEDIN_JOBS_URL = "https://www.linkedin.com/jobs/search/"
 logger = logging.getLogger(__name__)
+DETAIL_OPTIONAL_FIELDS = {
+    "title_detail": None,
+    "company_detail": None,
+    "date_posted": None,
+    "valid_through": None,
+    "employment_type": None,
+    "industry": None,
+    "skills": None,
+    "education_requirements": None,
+    "address_country": None,
+    "address_locality": None,
+    "address_region": None,
+    "latitude": None,
+    "longitude": None,
+    "description_html": "",
+    "source_parser": None,
+}
 
 
 def make_linkedin_search_url(params: dict[str, Any]) -> str:
@@ -199,7 +216,7 @@ async def collect_search_results(
 
 def parse_job_detail_html(html: str, fallback_url: str | None = None) -> dict[str, Any]:
     soup = BeautifulSoup(html, "lxml")
-    data: dict[str, Any] = {}
+    data: dict[str, Any] = dict(DETAIL_OPTIONAL_FIELDS)
     json_ld = None
 
     for script in soup.find_all("script", type="application/ld+json"):
@@ -332,6 +349,10 @@ async def collect_job_details(
     details_df = pd.DataFrame(rows)
     if details_df.empty:
         return details_df
+
+    for field, default in DETAIL_OPTIONAL_FIELDS.items():
+        if field not in details_df:
+            details_df[field] = default
 
     details_df["date_posted_dt"] = details_df["date_posted"].apply(
         lambda value: parse_iso_date_to_timezone(value, active_settings.timezone)
