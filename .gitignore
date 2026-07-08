@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.Spotlight-V100
+.Trashes
+.fseventsd
+
+# macOS cache folders
+__MACOSX
+
+# Python
+__pycache__/
+runtime/

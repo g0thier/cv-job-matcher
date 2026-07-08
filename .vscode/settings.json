@@ -1,0 +1,19 @@
+{
+  "workbench.colorCustomizations": {
+    "titleBar.activeBackground": "#7CB342",
+    "titleBar.inactiveBackground": "#689F38",
+
+    "titleBar.activeForeground": "#1F241C",
+    "titleBar.inactiveForeground": "#1F241C"
+  },
+  "files.exclude": {
+    "**/ACKNOWLEDGEMENTS.md": true,
+    "**/CHANGELOG.md": true,
+    "**/CODE_OF_CONDUCT.md": true,
+    "**/CONTRIBUTING.md": true,
+    "**/LICENSE.md": true,
+    "**/SECURITY.md": true,
+    "**/__pycache__": true,
+    "**/runtime": true
+  }
+}
