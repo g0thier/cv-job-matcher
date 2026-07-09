@@ -33,10 +33,9 @@ if st.button("Find matching offers", type="primary", use_container_width=True):
                 if not results:
                     st.warning("No offers matched the selected time window.")
                 else:
-                    results = sorted(results, key=lambda result: result.score_max, reverse=True)
                     for index, result in enumerate(results, start=1):
                         with st.expander(
-                            f"{index}. {result.title or 'Untitled'} - {result.company or 'Unknown company'} ({result.score_max:.4f})",
+                            f"{index}. {result.title or 'Untitled'} - {result.company or 'Unknown company'}",
                             expanded=index <= 3,
                         ):
                             st.markdown(
@@ -48,10 +47,11 @@ if st.button("Find matching offers", type="primary", use_container_width=True):
                                 **URL:** {result.canonical_url}
                                 """
                             )
-                            score_a, score_b, score_c = st.columns(3)
-                            score_a.metric("Score final", f"{result.score_final:.4f}")
-                            score_b.metric("Score max", f"{result.score_max:.4f}")
-                            score_c.metric("Score top5", f"{result.score_top5_mean:.4f}")
+                            score_a, score_b, score_c, score_d = st.columns(4)
+                            score_a.metric("Title score", f"{result.title_score:.4f}")
+                            score_b.metric("Text score final", f"{result.score_final:.4f}")
+                            score_c.metric("Text score max", f"{result.score_max:.4f}")
+                            score_d.metric("Text score top5", f"{result.score_top5_mean:.4f}")
                             left_col, right_col = st.columns(2)
                             with left_col:
                                 st.markdown("**Top matching paragraph**")

@@ -30,9 +30,6 @@ class Settings:
     cv_chunk_size: int = int(os.getenv("CV_CHUNK_SIZE", "300"))
     cv_chunk_overlap: int = int(os.getenv("CV_CHUNK_OVERLAP", "60"))
     paragraph_min_chars: int = int(os.getenv("PARAGRAPH_MIN_CHARS", "40"))
-    streamlit_candidate_limit: int = int(
-        os.getenv("STREAMLIT_CANDIDATE_LIMIT", "200")
-    )
     streamlit_result_limit: int = int(os.getenv("STREAMLIT_RESULT_LIMIT", "25"))
 
     @property
