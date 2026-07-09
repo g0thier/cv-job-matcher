@@ -261,7 +261,8 @@ def _attach_title_embeddings(
         normalized_titles[title_mask].tolist(),
         settings=settings,
     ).tolist()
-    vectorized_df.loc[title_mask, "title_embedding"] = embeddings
+    for row_index, embedding in zip(vectorized_df.index[title_mask], embeddings, strict=False):
+        vectorized_df.at[row_index, "title_embedding"] = embedding
     return vectorized_df
 
 
