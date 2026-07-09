@@ -26,7 +26,7 @@ def main() -> None:
     if args.command == "search":
         cv_text, cv_chunks, results = search_jobs_for_cv(
             args.cv_path.read_bytes(),
-            lookback_days=args.lookback_days,
+            lookback_hours=args.lookback_days * 24,
         )
         print({"cv_chars": len(cv_text), "cv_chunks": len(cv_chunks), "results": len(results)})
         for result in results:

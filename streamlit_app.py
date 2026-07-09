@@ -10,7 +10,16 @@ st.title("CV Job Matcher")
 st.caption("Upload a CV PDF, pick a time window, and retrieve the closest job offers from the database.")
 
 uploaded_file = st.file_uploader("CV PDF", type=["pdf"])
-lookback_days = st.slider("Lookback window (days)", min_value=1, max_value=30, value=7)
+filters_col, limit_col = st.columns(2)
+with filters_col:
+    lookback_hours = st.slider("Lookback window (hours)", min_value=1, max_value=168, value=24)
+with limit_col:
+    result_limit = st.segmented_control(
+        "Matching offers",
+        options=[25, 50, 100, 200],
+        default=25,
+        selection_mode="single",
+    )
 
 if st.button("Find matching offers", type="primary", use_container_width=True):
     if uploaded_file is None:
@@ -20,7 +29,8 @@ if st.button("Find matching offers", type="primary", use_container_width=True):
             try:
                 cv_text, cv_chunks, results = search_jobs_for_cv(
                     uploaded_file.getvalue(),
-                    lookback_days=lookback_days,
+                    lookback_hours=lookback_hours,
+                    result_limit=result_limit,
                 )
             except Exception as exc:
                 st.exception(exc)

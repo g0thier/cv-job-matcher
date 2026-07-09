@@ -82,7 +82,8 @@ def _rank_jobs_by_title(
 
 def search_jobs_for_cv(
     cv_bytes: bytes,
-    lookback_days: int,
+    lookback_hours: int,
+    result_limit: int = 25,
     settings: Settings | None = None,
 ) -> tuple[str, list[str], list[SearchResult]]:
     active_settings = settings or get_settings()
@@ -98,11 +99,11 @@ def search_jobs_for_cv(
         raise ValueError("No usable CV chunks were extracted.")
 
     cv_embeddings = encode_texts(cv_chunks, settings=active_settings).tolist()
-    min_date = utcnow() - timedelta(days=lookback_days)
+    min_date = utcnow() - timedelta(hours=lookback_hours)
 
     with session_scope(active_settings) as session:
         title_ranked_jobs = _rank_jobs_by_title(session, cv_chunks, cv_embeddings, min_date)
-        candidate_jobs = title_ranked_jobs[: active_settings.streamlit_result_limit]
+        candidate_jobs = title_ranked_jobs[:result_limit]
         candidate_urls = [job["canonical_url"] for job in candidate_jobs]
 
         per_job_matches: dict[str, dict] = {
@@ -225,4 +226,4 @@ def search_jobs_for_cv(
         key=lambda item: (item.title_score, item.score_final, item.score_max),
         reverse=True,
     )
-    return cv_text, cv_chunks, results[: active_settings.streamlit_result_limit]
+    return cv_text, cv_chunks, results[:result_limit]
