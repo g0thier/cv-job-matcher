@@ -17,6 +17,7 @@ class JobOffer(Base):
     source_url = Column(Text, nullable=True)
     search_url = Column(Text, nullable=True)
     title = Column(Text, nullable=True)
+    title_embedding = Column(Vector(384), nullable=True)
     company = Column(Text, nullable=True)
     location = Column(Text, nullable=True)
     date_posted = Column(DateTime(timezone=True), nullable=True, index=True)

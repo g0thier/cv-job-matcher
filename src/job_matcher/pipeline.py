@@ -56,6 +56,14 @@ def _sanitize_run_key(run_key: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", run_key)
 
 
+def _normalize_text(value: Any) -> str | None:
+    if pd.isna(value):
+        return None
+
+    text_value = str(value).strip()
+    return text_value or None
+
+
 def get_run_directory(run_key: str) -> Path:
     run_dir = RUNTIME_ROOT / _sanitize_run_key(run_key)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -235,6 +243,28 @@ def vectorize_paragraphs_step(
     }
 
 
+def _attach_title_embeddings(
+    offers_df: pd.DataFrame, settings: Settings | None = None
+) -> pd.DataFrame:
+    vectorized_df = offers_df.copy()
+    vectorized_df["title_embedding"] = None
+
+    if vectorized_df.empty:
+        return vectorized_df
+
+    normalized_titles = vectorized_df["final_title"].apply(_normalize_text)
+    title_mask = normalized_titles.notna()
+    if not title_mask.any():
+        return vectorized_df
+
+    embeddings = encode_texts(
+        normalized_titles[title_mask].tolist(),
+        settings=settings,
+    ).tolist()
+    vectorized_df.loc[title_mask, "title_embedding"] = embeddings
+    return vectorized_df
+
+
 def persist_offers_step(
     run_key: str,
     offers_path: str,
@@ -242,10 +272,13 @@ def persist_offers_step(
     settings: Settings | None = None,
 ) -> dict[str, int]:
     active_settings = settings or get_settings()
-    offers_df = _read_dataframe(offers_path)
+    offers_df = _attach_title_embeddings(
+        _read_dataframe(offers_path),
+        settings=active_settings,
+    )
     paragraphs_df = _read_dataframe(paragraphs_vectorized_path)
     logger.info(
-        "Persisting %s offers and %s vectorized paragraphs to Postgres",
+        "Persisting %s offers, their title embeddings, and %s vectorized paragraphs to Postgres",
         len(offers_df),
         len(paragraphs_df),
     )
@@ -283,6 +316,7 @@ def persist_offers_step(
             job_offer.source_url = _normalize_scalar(row.get("url"))
             job_offer.search_url = _normalize_scalar(row.get("search_url"))
             job_offer.title = _normalize_scalar(row.get("final_title"))
+            job_offer.title_embedding = row.get("title_embedding")
             job_offer.company = _normalize_scalar(row.get("final_company"))
             job_offer.location = _normalize_scalar(row.get("location"))
             job_offer.date_posted = _normalize_scalar(row.get("date_posted_dt"))
