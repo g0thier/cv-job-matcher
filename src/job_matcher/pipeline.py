@@ -78,6 +78,10 @@ def _write_json(data: dict[str, Any], path: Path) -> str:
     return str(path)
 
 
+def write_run_metadata(run_key: str, filename: str, data: dict[str, Any]) -> str:
+    return _write_json(data, get_run_directory(run_key) / filename)
+
+
 def initialize_run(
     settings: Settings | None = None,
     run_key: str | None = None,
@@ -101,11 +105,13 @@ def initialize_run(
 
 
 def collect_search_results_step(
-    run_key: str, settings: Settings | None = None
+    run_key: str,
+    settings: Settings | None = None,
+    searches: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     active_settings = settings or get_settings()
     run_dir = get_run_directory(run_key)
-    search_urls = build_search_urls(active_settings)
+    search_urls = build_search_urls(active_settings, searches=searches)
     logger.info("Collecting LinkedIn search results from %s search URLs", len(search_urls))
     for index, url in enumerate(search_urls, start=1):
         logger.info("Search URL %s/%s: %s", index, len(search_urls), url)

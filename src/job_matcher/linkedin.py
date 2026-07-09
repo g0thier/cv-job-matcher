@@ -48,11 +48,17 @@ def make_linkedin_search_url(params: dict[str, Any]) -> str:
     return f"{BASE_LINKEDIN_JOBS_URL}?{urlencode(params)}"
 
 
-def build_search_urls(settings: Settings | None = None) -> list[str]:
+def build_search_urls(
+    settings: Settings | None = None,
+    searches: list[dict[str, Any]] | None = None,
+) -> list[str]:
     active_settings = settings or get_settings()
+    effective_searches = (
+        load_linkedin_searches(active_settings) if searches is None else searches
+    )
     return [
         make_linkedin_search_url(params)
-        for params in load_linkedin_searches(active_settings)
+        for params in effective_searches
     ]
 
 
