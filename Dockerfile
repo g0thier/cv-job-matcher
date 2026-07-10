@@ -1,9 +1,13 @@
 FROM apache/airflow:2.9.3-python3.11
 
+ARG EMBEDDING_MODEL_NAME=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+
 USER root
 
 ENV PYTHONPATH=/opt/project/src
 ENV PLAYWRIGHT_BROWSERS_PATH=/home/airflow/.cache/ms-playwright
+ENV HF_HOME=/home/airflow/.cache/huggingface
+ENV EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME}
 
 COPY requirements.txt /tmp/requirements.txt
 
@@ -31,13 +35,17 @@ RUN apt-get update \
         libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /home/airflow/.cache/ms-playwright \
+RUN mkdir -p /home/airflow/.cache/ms-playwright /home/airflow/.cache/huggingface \
     && chown -R airflow:0 /home/airflow/.cache
 
 USER airflow
 
 RUN pip install --no-cache-dir -r /tmp/requirements.txt \
-    && python -m playwright install chromium
+    && python -m playwright install chromium \
+    && python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL_NAME}')"
+
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
 
 WORKDIR /opt/project
 COPY --chown=airflow:0 . /opt/project
