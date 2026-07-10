@@ -13,6 +13,7 @@ from job_matcher.config import get_settings, load_linkedin_searches
 from job_matcher.pipeline import (
     collect_job_details_step,
     collect_search_results_step,
+    filter_existing_jobs_step,
     initialize_run,
     persist_offers_step,
     prepare_dataframes_step,
@@ -103,10 +104,19 @@ def linkedin_jobs_ingestion_startup():
         return result
 
     @task
-    def collect_details(search_result: dict[str, str | int]):
-        result = collect_job_details_step(
+    def filter_known_jobs(search_result: dict[str, str | int]):
+        result = filter_existing_jobs_step(
             search_result["run_key"],
             search_result["jobs_path"],
+        )
+        logger.info("Known-job filtering result: %s", result)
+        return result
+
+    @task
+    def collect_details(filtered_result: dict[str, str | int]):
+        result = collect_job_details_step(
+            filtered_result["run_key"],
+            filtered_result["jobs_path"],
         )
         logger.info("Detail collection result: %s", result)
         return result
@@ -145,7 +155,8 @@ def linkedin_jobs_ingestion_startup():
 
     run_context = setup_run()
     search_result = collect_jobs(run_context)
-    detail_result = collect_details(search_result)
+    filtered_result = filter_known_jobs(search_result)
+    detail_result = collect_details(filtered_result)
     prepared_result = prepare_payloads(detail_result)
     vectorized_result = vectorize_paragraphs(prepared_result)
     persist_results(prepared_result, vectorized_result)

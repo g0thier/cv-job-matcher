@@ -140,6 +140,50 @@ def collect_search_results_step(
     }
 
 
+def filter_existing_jobs_step(
+    run_key: str, jobs_path: str, settings: Settings | None = None
+) -> dict[str, Any]:
+    active_settings = settings or get_settings()
+    run_dir = get_run_directory(run_key)
+    jobs_df = _read_dataframe(jobs_path)
+
+    if jobs_df.empty:
+        filtered_path = run_dir / "jobs_filtered.pkl"
+        _write_dataframe(jobs_df, filtered_path)
+        logger.info("No job cards to filter before detail collection")
+        return {
+            "run_key": run_key,
+            "jobs_path": str(filtered_path),
+            "jobs_count": 0,
+            "jobs_skipped": 0,
+        }
+
+    with session_scope(active_settings) as session:
+        existing_urls = {
+            canonical_url
+            for (canonical_url,) in session.query(JobOffer.canonical_url).all()
+            if canonical_url
+        }
+
+    filtered_jobs_df = jobs_df[~jobs_df["url"].isin(existing_urls)].reset_index(drop=True)
+    skipped_jobs = int(len(jobs_df) - len(filtered_jobs_df))
+    filtered_path = run_dir / "jobs_filtered.pkl"
+    _write_dataframe(filtered_jobs_df, filtered_path)
+
+    logger.info(
+        "Pre-filtered known offers before detail collection: %s found, %s already known, %s remaining",
+        len(jobs_df),
+        skipped_jobs,
+        len(filtered_jobs_df),
+    )
+    return {
+        "run_key": run_key,
+        "jobs_path": str(filtered_path),
+        "jobs_count": int(len(filtered_jobs_df)),
+        "jobs_skipped": skipped_jobs,
+    }
+
+
 def collect_job_details_step(
     run_key: str, jobs_path: str, settings: Settings | None = None
 ) -> dict[str, Any]:
