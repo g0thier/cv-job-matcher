@@ -226,6 +226,81 @@ class PersistOffersStepTests(unittest.TestCase):
         self.assertEqual(result["paragraphs_saved"], 0)
         mock_write_json.assert_called_once()
 
+    @patch("job_matcher.pipeline._write_json")
+    @patch("job_matcher.pipeline._read_dataframe")
+    @patch("job_matcher.pipeline._attach_title_embeddings")
+    def test_skips_duplicate_urls_within_same_batch(
+        self,
+        mock_attach_title_embeddings,
+        mock_read_dataframe,
+        mock_write_json,
+    ) -> None:
+        offers_df = pd.DataFrame(
+            {
+                "final_url": [
+                    "https://www.linkedin.com/jobs/view/1",
+                    "https://www.linkedin.com/jobs/view/1",
+                ],
+                "final_job_id": ["1", "1"],
+                "url": [
+                    "https://www.linkedin.com/jobs/view/1",
+                    "https://www.linkedin.com/jobs/view/1",
+                ],
+                "search_url": [
+                    "https://www.linkedin.com/jobs/search",
+                    "https://www.linkedin.com/jobs/search",
+                ],
+                "final_title": ["Data Scientist", "Data Scientist"],
+                "final_company": ["OpenAI", "OpenAI"],
+            }
+        )
+        mock_attach_title_embeddings.return_value = offers_df
+        mock_read_dataframe.side_effect = [offers_df, pd.DataFrame()]
+
+        class EmptyOfferQuery:
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def one_or_none(self):
+                return None
+
+        class FakeJobOffer:
+            canonical_url = "canonical_url"
+
+            def __init__(self, canonical_url, collected_at, updated_at):
+                self.canonical_url = canonical_url
+                self.collected_at = collected_at
+                self.updated_at = updated_at
+                self.paragraphs = []
+
+        @contextmanager
+        def fake_session_scope(_settings=None):
+            session = SimpleNamespace(
+                no_autoflush=contextmanager(lambda: iter([None]))(),
+                query=lambda *_args, **_kwargs: EmptyOfferQuery(),
+                add=lambda *_args, **_kwargs: None,
+            )
+            yield session
+
+        with patch("job_matcher.pipeline.session_scope", fake_session_scope), patch(
+            "job_matcher.pipeline.JobOffer",
+            FakeJobOffer,
+        ), patch(
+            "job_matcher.pipeline.get_run_directory",
+            return_value=Path("runtime/airflow/run-1"),
+        ):
+            result = persist_offers_step(
+                "run-1",
+                "runtime/airflow/run-1/offers.pkl",
+                "runtime/airflow/run-1/paragraphs_vectorized.pkl",
+            )
+
+        self.assertEqual(result["offers_seen"], 2)
+        self.assertEqual(result["offers_saved"], 1)
+        self.assertEqual(result["offers_skipped"], 1)
+        self.assertEqual(result["paragraphs_saved"], 0)
+        mock_write_json.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

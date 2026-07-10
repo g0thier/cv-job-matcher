@@ -239,6 +239,15 @@ def prepare_dataframes_step(
         len(details_df),
     )
     offers_df = prepare_offers_dataframe(jobs_df, details_df)
+    if not offers_df.empty:
+        offers_before_dedup = len(offers_df)
+        offers_df = offers_df.drop_duplicates(subset=["final_url"]).reset_index(drop=True)
+        duplicate_offers = offers_before_dedup - len(offers_df)
+        if duplicate_offers:
+            logger.warning(
+                "Dropped %s duplicate offers from prepared dataframe based on final_url",
+                duplicate_offers,
+            )
     paragraphs_df = build_job_paragraphs(offers_df, active_settings)
 
     offers_path = run_dir / "offers.pkl"
@@ -332,10 +341,20 @@ def persist_offers_step(
     skipped_offers = 0
     saved_paragraphs = 0
     now = utcnow()
+    seen_urls: set[str] = set()
 
     with session_scope(active_settings) as session:
         for _, row in offers_df.iterrows():
             canonical_url = row["final_url"]
+            if canonical_url in seen_urls:
+                skipped_offers += 1
+                logger.info(
+                    "Skipping duplicate offer within current batch: %s",
+                    canonical_url,
+                )
+                continue
+
+            seen_urls.add(canonical_url)
             with session.no_autoflush:
                 job_offer = (
                     session.query(JobOffer)
