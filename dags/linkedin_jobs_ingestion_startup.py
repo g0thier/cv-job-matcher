@@ -43,10 +43,11 @@ def _build_startup_searches(
         "Collect LinkedIn public jobs once at Airflow startup using a dynamic "
         "lookback window from local midnight."
     ),
-    schedule="@once",
+    schedule=None,
     start_date=datetime(2024, 1, 1, tz="UTC"),
     catchup=False,
     max_active_runs=1,
+    is_paused_upon_creation=False,
     tags=["jobs", "linkedin", "pgvector", "startup"],
 )
 def linkedin_jobs_ingestion_startup():

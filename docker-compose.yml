@@ -77,6 +77,21 @@ services:
       - .:/opt/project
       - airflow_logs:/opt/airflow/logs
 
+  airflow-startup-trigger:
+    build: *app-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-scheduler:
+        condition: service_started
+    environment: *common-env
+    command: ["bash", "/opt/project/scripts/trigger_startup_dags.sh"]
+    volumes:
+      - .:/opt/project
+      - airflow_logs:/opt/airflow/logs
+
   streamlit:
     build: *app-build
     depends_on:

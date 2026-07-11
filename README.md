@@ -155,6 +155,44 @@ Default Airflow credentials from `.env.example`:
 - username: `admin`
 - password: `admin`
 
+### Airflow startup DAG
+
+The repository includes a dedicated DAG named `linkedin_jobs_ingestion_startup` for one ingestion run per Airflow environment startup.
+
+- The DAG itself uses `schedule=None`, so it is not scheduled by Airflow and remains manually triggerable.
+- This replaces `schedule="@once"`, which only fires once for a DAG as long as a prior `DagRun` already exists.
+- Automatic startup triggering is handled outside DAG parsing by the dedicated Docker Compose service `airflow-startup-trigger`.
+- The trigger entrypoint lives at `scripts/trigger_startup_dags.sh` and waits for the Airflow metadata database, waits for DAG discovery, unpauses the DAG, claims the logical startup in the shared database, and then triggers the DAG.
+
+Startup trigger environment variables:
+
+- `STARTUP_DAG_MAX_ATTEMPTS`: maximum retry attempts while waiting for Airflow and DAG discovery
+- `STARTUP_DAG_RETRY_DELAY`: delay in seconds between retries
+- `AIRFLOW_STARTUP_ID`: optional shared logical startup identifier used to deduplicate concurrent startup-trigger processes against the same Airflow metadata database
+
+Manual trigger command:
+
+```bash
+airflow dags trigger \
+    --run-id "manual__$(date -u +%Y%m%dT%H%M%SZ)" \
+    linkedin_jobs_ingestion_startup
+```
+
+Diagnostics when the startup DAG does not run:
+
+- Check the logs of the `airflow-startup-trigger` service first.
+- Confirm `airflow db check` succeeds inside the Airflow containers.
+- Confirm `airflow dags list` shows `linkedin_jobs_ingestion_startup`.
+- If the logs mention an existing startup claim, inspect the `startup_dag_triggers` table in the shared Airflow metadata database.
+
+Current idempotence notes for repeated startup runs:
+
+- LinkedIn search results are deduplicated before persistence.
+- Prepared offers are deduplicated on `final_url`.
+- Persistence skips existing `canonical_url` values already stored in Postgres and same-batch duplicates.
+- `persist_offers_step` commits in one database transaction, so partial writes from that step are rolled back on failure.
+- The current behavior is insert-idempotent, not a full refresh strategy: an already stored offer is skipped rather than updated if LinkedIn content changes later.
+
 ## 🥽 Security
 
 - See [SECURITY.md](/SECURITY.md) for vulnerability reporting guidelines.
