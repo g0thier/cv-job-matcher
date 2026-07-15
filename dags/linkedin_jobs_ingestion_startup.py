@@ -71,7 +71,8 @@ def linkedin_jobs_ingestion_startup():
         )
 
         run_id = os.environ.get("AIRFLOW_CTX_DAG_RUN_ID")
-        run_context = initialize_run(settings=active_settings, run_key=run_id)
+        run_key = f"linkedin_jobs_ingestion_startup__{run_id}" if run_id else None
+        run_context = initialize_run(settings=active_settings, run_key=run_key)
         metadata_path = write_run_metadata(
             run_context["run_key"],
             "startup_context.json",

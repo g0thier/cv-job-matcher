@@ -399,6 +399,7 @@ def prepare_offers_dataframe(
     merged_df["final_url"] = merged_df["canonical_url"].fillna(merged_df["url"])
     merged_df["final_title"] = merged_df["title_detail"].replace("", pd.NA).fillna(merged_df["title"])
     merged_df["final_company"] = merged_df["company_detail"].replace("", pd.NA).fillna(merged_df["company"])
+    merged_df["source"] = "linkedin"
 
     return (
         merged_df.dropna(subset=["final_url"])

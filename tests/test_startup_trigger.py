@@ -172,23 +172,29 @@ class StartupTriggerScriptTests(unittest.TestCase):
                 count = read_count("dags_list_count") + 1
                 write_count("dags_list_count", count)
                 ready_after = int(os.environ.get("FAKE_AIRFLOW_DAG_READY_AFTER", "1"))
-                dag_id = os.environ.get("FAKE_AIRFLOW_DAG_ID", "linkedin_jobs_ingestion_startup")
-                paused_state = os.environ.get("FAKE_AIRFLOW_PAUSED_STATE", "true").lower() == "true"
-                if (state_dir / "unpaused").exists():
-                    paused_state = False
+                dag_ids = os.environ.get(
+                    "FAKE_AIRFLOW_DAG_IDS",
+                    os.environ.get("FAKE_AIRFLOW_DAG_ID", "linkedin_jobs_ingestion_startup"),
+                ).split(",")
                 if "--output" in args and "json" in args:
                     payload = []
                     if count >= ready_after:
-                        payload.append({"dag_id": dag_id, "is_paused": paused_state})
+                        for dag_id in dag_ids:
+                            paused_state = os.environ.get("FAKE_AIRFLOW_PAUSED_STATE", "true").lower() == "true"
+                            if (state_dir / f"unpaused_{dag_id}").exists():
+                                paused_state = False
+                            payload.append({"dag_id": dag_id, "is_paused": paused_state})
                     print(json.dumps(payload))
                     raise SystemExit(0)
                 if count >= ready_after:
-                    print(f"{dag_id} | /opt/project/dags/{dag_id}.py | owner | False")
+                    for dag_id in dag_ids:
+                        print(f"{dag_id} | /opt/project/dags/{dag_id}.py | owner | False")
                 raise SystemExit(0)
 
             if args[:2] == ["dags", "unpause"]:
                 dag_id = args[2]
                 (state_dir / "unpaused").write_text(dag_id)
+                (state_dir / f"unpaused_{dag_id}").write_text(dag_id)
                 print(f"Dag: {dag_id}, paused: False")
                 raise SystemExit(0)
 
@@ -197,6 +203,8 @@ class StartupTriggerScriptTests(unittest.TestCase):
                 dag_id = args[-1]
                 (state_dir / "last_trigger_run_id").write_text(run_id)
                 (state_dir / "last_trigger_dag_id").write_text(dag_id)
+                with (state_dir / "triggered_dag_ids").open("a") as output:
+                    output.write(f"{dag_id}\\n")
                 print(f"Triggered {dag_id} with {run_id}")
                 raise SystemExit(0)
 
@@ -225,6 +233,7 @@ class StartupTriggerScriptTests(unittest.TestCase):
                     "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": f"sqlite:///{database_path}",
                     "STARTUP_DAG_MAX_ATTEMPTS": "3",
                     "STARTUP_DAG_RETRY_DELAY": "0",
+                    "STARTUP_DAG_IDS": "linkedin_jobs_ingestion_startup",
                 }
             )
             env.update(env_overrides)
@@ -267,6 +276,28 @@ class StartupTriggerScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertEqual(result.state["last_trigger_run_id"], "startup__shared-startup")
 
+    def test_script_triggers_linkedin_and_etat_geneve_startup_dags(self) -> None:
+        dag_ids = (
+            "linkedin_jobs_ingestion_startup,"
+            "etat_geneve_jobs_ingestion_startup"
+        )
+        result = self._run_script(
+            {
+                "STARTUP_DAG_IDS": dag_ids,
+                "FAKE_AIRFLOW_DAG_IDS": dag_ids,
+                "AIRFLOW_STARTUP_ID": "shared-startup",
+            }
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(
+            result.state["triggered_dag_ids"].splitlines(),
+            [
+                "linkedin_jobs_ingestion_startup",
+                "etat_geneve_jobs_ingestion_startup",
+            ],
+        )
+
     def test_script_fallback_run_id_changes_between_invocations(self) -> None:
         first = self._run_script({})
         second = self._run_script({})
@@ -307,6 +338,7 @@ class StartupTriggerScriptTests(unittest.TestCase):
                     "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN": f"sqlite:///{database_path}",
                     "STARTUP_DAG_MAX_ATTEMPTS": "3",
                     "STARTUP_DAG_RETRY_DELAY": "0",
+                    "STARTUP_DAG_IDS": "linkedin_jobs_ingestion_startup",
                     "AIRFLOW_STARTUP_ID": "shared-startup",
                 }
             )

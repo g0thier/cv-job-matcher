@@ -4,6 +4,28 @@ import streamlit as st
 
 from job_matcher.search import search_jobs_for_cv
 
+SOURCE_LABELS = {
+    "linkedin": "LinkedIn",
+    "etat_geneve": "État de Genève",
+}
+SOURCE_ICONS = {
+    "linkedin": "app/static/source-icons/linkedin.png",
+    "etat_geneve": "app/static/source-icons/etat-geneve.png",
+}
+
+
+def clean_company_name(company: str | None) -> str:
+    company = (company or "").strip()
+    if not company:
+        return "Unknown company"
+
+    cutoff = min(
+        (company.index(separator) for separator in (",", "(", ":") if separator in company),
+        default=len(company),
+    )
+    return company[:cutoff].strip() or "Unknown company"
+
+
 st.set_page_config(page_title="CV Job Matcher", page_icon=":briefcase:", layout="wide")
 
 st.title("CV Job Matcher")
@@ -44,8 +66,23 @@ if st.button("Find matching offers", type="primary", use_container_width=True):
                     st.warning("No offers matched the selected time window.")
                 else:
                     for index, result in enumerate(results, start=1):
+                        source_label = SOURCE_LABELS.get(
+                            result.source or "",
+                            result.source or "Source inconnue",
+                        )
+                        source_icon = SOURCE_ICONS.get(result.source or "")
+                        source_prefix = (
+                            f"![{source_label}]({source_icon}) "
+                            if source_icon
+                            else ""
+                        )
+                        company_name = clean_company_name(result.company)
                         with st.expander(
-                            f"{index}. {result.title or 'Untitled'} - {result.company or 'Unknown company'}",
+                            (
+                                f"{index}. {source_prefix}"
+                                f"{result.title or 'Untitled'} - "
+                                f"{company_name}"
+                            ),
                             expanded=index <= 3,
                         ):
                             st.markdown(

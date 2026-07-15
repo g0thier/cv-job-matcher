@@ -14,6 +14,7 @@ class JobOffer(Base):
     id = Column(Integer, primary_key=True)
     external_job_id = Column(Text, index=True)
     canonical_url = Column(Text, unique=True, nullable=False)
+    source = Column(Text, nullable=True, index=True)
     source_url = Column(Text, nullable=True)
     search_url = Column(Text, nullable=True)
     title = Column(Text, nullable=True)

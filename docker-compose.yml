@@ -36,6 +36,11 @@ services:
       PYTHONPATH: /opt/project/src
       PLAYWRIGHT_BROWSERS_PATH: /home/airflow/.cache/ms-playwright
       EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      ETAT_GENEVE_RSS_URL: ${ETAT_GENEVE_RSS_URL:-https://www.ge.ch/rss/offres-emploi-etat-geneve?departement=0&domaine_activite=0&classe_fonction_min=0&type_contrat=0&taux_activite_max=0}
+      STARTUP_DAG_IDS: ${STARTUP_DAG_IDS:-linkedin_jobs_ingestion_startup,etat_geneve_jobs_ingestion_startup}
+      STARTUP_DAG_MAX_ATTEMPTS: ${STARTUP_DAG_MAX_ATTEMPTS:-30}
+      STARTUP_DAG_RETRY_DELAY: ${STARTUP_DAG_RETRY_DELAY:-5}
+      AIRFLOW_STARTUP_ID: ${AIRFLOW_STARTUP_ID:-}
     volumes:
       - .:/opt/project
       - airflow_logs:/opt/airflow/logs
@@ -102,6 +107,7 @@ services:
       PYTHONPATH: /opt/project/src
       PLAYWRIGHT_BROWSERS_PATH: /home/airflow/.cache/ms-playwright
       EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      ETAT_GENEVE_RSS_URL: ${ETAT_GENEVE_RSS_URL:-https://www.ge.ch/rss/offres-emploi-etat-geneve?departement=0&domaine_activite=0&classe_fonction_min=0&type_contrat=0&taux_activite_max=0}
     entrypoint: ["python", "-m", "streamlit", "run"]
     command: ["streamlit_app.py", "--server.address", "0.0.0.0", "--server.port", "8501"]
     ports:

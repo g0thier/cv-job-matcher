@@ -18,6 +18,14 @@ class Settings:
     linkedin_searches_file: Path = Path(
         os.getenv("LINKEDIN_SEARCHES_FILE", "config/linkedin_searches.json")
     )
+    etat_geneve_rss_url: str = os.getenv(
+        "ETAT_GENEVE_RSS_URL",
+        (
+            "https://www.ge.ch/rss/offres-emploi-etat-geneve"
+            "?departement=0&domaine_activite=0&classe_fonction_min=0"
+            "&type_contrat=0&taux_activite_max=0"
+        ),
+    )
     embedding_model_name: str = os.getenv(
         "EMBEDDING_MODEL_NAME",
         "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",

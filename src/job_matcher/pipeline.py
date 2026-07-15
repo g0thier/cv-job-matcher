@@ -13,6 +13,12 @@ import pandas as pd
 from job_matcher.config import Settings, get_settings
 from job_matcher.database import ensure_database, session_scope
 from job_matcher.embeddings import encode_texts
+from job_matcher.etat_geneve import (
+    build_job_paragraphs as build_etat_geneve_job_paragraphs,
+    collect_feed_results as collect_etat_geneve_feed_results,
+    collect_job_details as collect_etat_geneve_job_details,
+    prepare_offers_dataframe as prepare_etat_geneve_offers_dataframe,
+)
 from job_matcher.linkedin import (
     build_job_paragraphs,
     build_search_urls,
@@ -140,6 +146,31 @@ def collect_search_results_step(
     }
 
 
+def collect_etat_geneve_feed_step(
+    run_key: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    active_settings = settings or get_settings()
+    run_dir = get_run_directory(run_key)
+    logger.info(
+        "Collecting État de Genève jobs from %s",
+        active_settings.etat_geneve_rss_url,
+    )
+    jobs_df = collect_etat_geneve_feed_results(active_settings)
+    jobs_path = run_dir / "etat_geneve_jobs.pkl"
+    _write_dataframe(jobs_df, jobs_path)
+    logger.info(
+        "Collected %s unique État de Genève job entries and saved them to %s",
+        len(jobs_df),
+        jobs_path,
+    )
+    return {
+        "run_key": run_key,
+        "jobs_path": str(jobs_path),
+        "jobs_count": int(len(jobs_df)),
+    }
+
+
 def filter_existing_jobs_step(
     run_key: str, jobs_path: str, settings: Settings | None = None
 ) -> dict[str, Any]:
@@ -222,6 +253,39 @@ def collect_job_details_step(
     }
 
 
+def collect_etat_geneve_job_details_step(
+    run_key: str,
+    jobs_path: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    active_settings = settings or get_settings()
+    run_dir = get_run_directory(run_key)
+    jobs_df = _read_dataframe(jobs_path)
+    logger.info(
+        "Collecting details for %s État de Genève job entries",
+        len(jobs_df),
+    )
+    details_df = collect_etat_geneve_job_details(jobs_df, active_settings)
+    details_path = run_dir / "etat_geneve_details.pkl"
+    _write_dataframe(details_df, details_path)
+    status_counts = (
+        details_df["detail_status"].fillna("missing").value_counts().to_dict()
+        if not details_df.empty and "detail_status" in details_df
+        else {}
+    )
+    logger.info(
+        "Collected %s État de Genève detail pages with status distribution: %s",
+        len(details_df),
+        status_counts,
+    )
+    return {
+        "run_key": run_key,
+        "jobs_path": jobs_path,
+        "details_path": str(details_path),
+        "details_count": int(len(details_df)),
+    }
+
+
 def prepare_dataframes_step(
     run_key: str,
     jobs_path: str,
@@ -257,6 +321,45 @@ def prepare_dataframes_step(
 
     logger.info(
         "Prepared %s offers and %s paragraphs",
+        len(offers_df),
+        len(paragraphs_df),
+    )
+    return {
+        "run_key": run_key,
+        "offers_path": str(offers_path),
+        "paragraphs_path": str(paragraphs_path),
+        "offers_count": int(len(offers_df)),
+        "paragraphs_count": int(len(paragraphs_df)),
+    }
+
+
+def prepare_etat_geneve_dataframes_step(
+    run_key: str,
+    jobs_path: str,
+    details_path: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    active_settings = settings or get_settings()
+    run_dir = get_run_directory(run_key)
+    jobs_df = _read_dataframe(jobs_path)
+    details_df = _read_dataframe(details_path)
+    offers_df = prepare_etat_geneve_offers_dataframe(
+        jobs_df,
+        details_df,
+        active_settings,
+    )
+    if not offers_df.empty:
+        offers_df = offers_df.drop_duplicates(subset=["final_url"]).reset_index(
+            drop=True
+        )
+    paragraphs_df = build_etat_geneve_job_paragraphs(offers_df, active_settings)
+
+    offers_path = run_dir / "etat_geneve_offers.pkl"
+    paragraphs_path = run_dir / "etat_geneve_paragraphs.pkl"
+    _write_dataframe(offers_df, offers_path)
+    _write_dataframe(paragraphs_df, paragraphs_path)
+    logger.info(
+        "Prepared %s État de Genève offers and %s paragraphs",
         len(offers_df),
         len(paragraphs_df),
     )
@@ -377,6 +480,7 @@ def persist_offers_step(
             session.add(job_offer)
 
             job_offer.external_job_id = _normalize_scalar(row.get("final_job_id"))
+            job_offer.source = _normalize_scalar(row.get("source"))
             job_offer.source_url = _normalize_scalar(row.get("url"))
             job_offer.search_url = _normalize_scalar(row.get("search_url"))
             job_offer.title = _normalize_scalar(row.get("final_title"))

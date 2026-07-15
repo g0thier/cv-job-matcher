@@ -2,9 +2,9 @@
 
 ## Description
 
-LinkedIn job ingestion and search pipeline built with `Airflow`, `PostgreSQL + pgvector`, `Playwright`, and `Streamlit`, with default search mappings for Geneva and Lausanne.
+LinkedIn and État de Genève job ingestion and search pipeline built with `Airflow`, `PostgreSQL + pgvector`, `Playwright`, and `Streamlit`, with default LinkedIn search mappings for Geneva and Lausanne.
 
-The project collects public LinkedIn job offers around Geneva and Lausanne by default, extracts useful details, splits descriptions into paragraphs, computes embeddings, stores everything in a database, and compares a PDF resume against the closest opportunities.
+The project collects public LinkedIn job offers around Geneva and Lausanne as well as the État de Genève RSS job feed, extracts useful details, splits descriptions into paragraphs, computes embeddings, stores everything in a shared database, and compares a PDF resume against the closest opportunities.
 
 ![Capture](/docs/images/Capture.png)
 
@@ -31,7 +31,7 @@ The project collects public LinkedIn job offers around Geneva and Lausanne by de
 
 ## 🎯 Objective of the project
 
-Automate public LinkedIn job collection and accelerate semantic matching between a resume and recent opportunities.
+Automate public LinkedIn and État de Genève job collection and accelerate semantic matching between a resume and recent opportunities.
 
 ## 👥 Target audience
 
@@ -50,7 +50,7 @@ Automate public LinkedIn job collection and accelerate semantic matching between
   - `LICENSE.md`
   - `SECURITY.md`
 - A Streamlit interface via [`streamlit_app.py`](/Users/gauthier/Desktop/cron_job/streamlit_app.py)
-- Airflow orchestration via [`dags/linkedin_jobs_ingestion.py`](/Users/gauthier/Desktop/cron_job/dags/linkedin_jobs_ingestion.py)
+- Airflow orchestration for LinkedIn and État de Genève via the `dags/` directory
 - A Python application layer in [`src/job_matcher/`](/Users/gauthier/Desktop/cron_job/src/job_matcher)
 - LinkedIn search configuration in [`config/linkedin_searches.json`](/Users/gauthier/Desktop/cron_job/config/linkedin_searches.json)
 
@@ -74,9 +74,16 @@ cron_job/
 ├── config/
 │   └── linkedin_searches.json
 ├── dags/
-│   └── linkedin_jobs_ingestion.py
+│   ├── etat_geneve_jobs_ingestion.py
+│   ├── etat_geneve_jobs_ingestion_startup.py
+│   ├── linkedin_jobs_ingestion.py
+│   └── linkedin_jobs_ingestion_startup.py
 ├── runtime/
 │   └── airflow/
+├── static/
+│   └── source-icons/
+│       ├── etat-geneve.png
+│       └── linkedin.png
 ├── src/
 │   └── job_matcher/
 │       ├── cli.py
@@ -84,12 +91,15 @@ cron_job/
 │       ├── cv.py
 │       ├── database.py
 │       ├── embeddings.py
+│       ├── etat_geneve.py
 │       ├── linkedin.py
 │       ├── models.py
 │       ├── pipeline.py
 │       ├── search.py
 │       └── text_utils.py
 ├── .env.example
+├── .streamlit/
+│   └── config.toml
 ├── ACKNOWLEDGEMENTS.md
 ├── CHANGELOG.md
 ├── CODE_OF_CONDUCT.md
@@ -157,15 +167,16 @@ Default Airflow credentials from `.env.example`:
 
 ### Airflow startup DAG
 
-The repository includes a dedicated DAG named `linkedin_jobs_ingestion_startup` for one ingestion run per Airflow environment startup.
+The repository includes `linkedin_jobs_ingestion_startup` and `etat_geneve_jobs_ingestion_startup` for one ingestion run per source and per Airflow environment startup.
 
-- The DAG itself uses `schedule=None`, so it is not scheduled by Airflow and remains manually triggerable.
+- Both startup DAGs use `schedule=None`, so they are not scheduled by Airflow and remain manually triggerable.
 - This replaces `schedule="@once"`, which only fires once for a DAG as long as a prior `DagRun` already exists.
-- Automatic startup triggering is handled outside DAG parsing by the dedicated Docker Compose service `airflow-startup-trigger`.
-- The trigger entrypoint lives at `scripts/trigger_startup_dags.sh` and waits for the Airflow metadata database, waits for DAG discovery, unpauses the DAG, claims the logical startup in the shared database, and then triggers the DAG.
+- Automatic startup triggering is handled outside DAG parsing by the dedicated Docker Compose service `airflow-startup-trigger`, which triggers both startup DAGs by default.
+- The trigger entrypoint lives at `scripts/trigger_startup_dags.sh` and waits for the Airflow metadata database, waits for each DAG discovery, unpauses each DAG, claims the logical startup in the shared database, and then triggers it.
 
 Startup trigger environment variables:
 
+- `STARTUP_DAG_IDS`: comma-separated startup DAG IDs; defaults to the LinkedIn and État de Genève startup DAGs
 - `STARTUP_DAG_MAX_ATTEMPTS`: maximum retry attempts while waiting for Airflow and DAG discovery
 - `STARTUP_DAG_RETRY_DELAY`: delay in seconds between retries
 - `AIRFLOW_STARTUP_ID`: optional shared logical startup identifier used to deduplicate concurrent startup-trigger processes against the same Airflow metadata database
@@ -176,22 +187,27 @@ Manual trigger command:
 airflow dags trigger \
     --run-id "manual__$(date -u +%Y%m%dT%H%M%SZ)" \
     linkedin_jobs_ingestion_startup
+
+airflow dags trigger \
+    --run-id "manual__$(date -u +%Y%m%dT%H%M%SZ)" \
+    etat_geneve_jobs_ingestion_startup
 ```
 
 Diagnostics when the startup DAG does not run:
 
 - Check the logs of the `airflow-startup-trigger` service first.
 - Confirm `airflow db check` succeeds inside the Airflow containers.
-- Confirm `airflow dags list` shows `linkedin_jobs_ingestion_startup`.
+- Confirm `airflow dags list` shows both configured startup DAGs.
 - If the logs mention an existing startup claim, inspect the `startup_dag_triggers` table in the shared Airflow metadata database.
 
 Current idempotence notes for repeated startup runs:
 
-- LinkedIn search results are deduplicated before persistence.
+- LinkedIn search results and État de Genève feed entries are deduplicated before persistence.
 - Prepared offers are deduplicated on `final_url`.
 - Persistence skips existing `canonical_url` values already stored in Postgres and same-batch duplicates.
 - `persist_offers_step` commits in one database transaction, so partial writes from that step are rolled back on failure.
-- The current behavior is insert-idempotent, not a full refresh strategy: an already stored offer is skipped rather than updated if LinkedIn content changes later.
+- The current behavior is insert-idempotent, not a full refresh strategy: an already stored offer is skipped rather than updated if source content changes later.
+- Streamlit ranks both sources in one result set and displays the source of every offer.
 
 ## 🥽 Security
 

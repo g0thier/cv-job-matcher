@@ -2,7 +2,9 @@
 
 set -euo pipefail
 
-DAG_ID="${STARTUP_DAG_ID:-linkedin_jobs_ingestion_startup}"
+DEFAULT_DAG_IDS="linkedin_jobs_ingestion_startup,etat_geneve_jobs_ingestion_startup"
+RAW_DAG_IDS="${STARTUP_DAG_IDS:-${STARTUP_DAG_ID:-$DEFAULT_DAG_IDS}}"
+read -r -a DAG_IDS <<< "${RAW_DAG_IDS//,/ }"
 MAX_ATTEMPTS="${STARTUP_DAG_MAX_ATTEMPTS:-30}"
 RETRY_DELAY="${STARTUP_DAG_RETRY_DELAY:-5}"
 
@@ -25,10 +27,12 @@ fail() {
 }
 
 dag_is_listed() {
-    airflow dags list 2>/dev/null | grep -qE "(^|[[:space:]])${DAG_ID}([[:space:]]|$)"
+    local dag_id="$1"
+    airflow dags list 2>/dev/null | grep -qE "(^|[[:space:]])${dag_id}([[:space:]]|$)"
 }
 
 dag_is_unpaused() {
+    local dag_id="$1"
     local dags_json
 
     dags_json="$(airflow dags list --output json 2>/dev/null || true)"
@@ -36,7 +40,7 @@ dag_is_unpaused() {
         return 1
     fi
 
-    AIRFLOW_DAGS_JSON="$dags_json" "$PYTHON_BIN" - "$DAG_ID" <<'PY'
+    AIRFLOW_DAGS_JSON="$dags_json" "$PYTHON_BIN" - "$dag_id" <<'PY'
 import json
 import os
 import sys
@@ -80,54 +84,52 @@ wait_for_airflow_db() {
 }
 
 wait_for_dag_discovery() {
-    log "Waiting for DAG ${DAG_ID} discovery..."
+    local dag_id="$1"
+    log "Waiting for DAG ${dag_id} discovery..."
 
     for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
-        if dag_is_listed; then
-            log "DAG ${DAG_ID} detected."
+        if dag_is_listed "$dag_id"; then
+            log "DAG ${dag_id} detected."
             return 0
         fi
 
         if [ "$attempt" -eq "$MAX_ATTEMPTS" ]; then
-            fail "DAG ${DAG_ID} was not discovered after ${MAX_ATTEMPTS} attempts."
+            fail "DAG ${dag_id} was not discovered after ${MAX_ATTEMPTS} attempts."
         fi
 
-        log "DAG ${DAG_ID} not available yet, retrying in ${RETRY_DELAY}s..."
+        log "DAG ${dag_id} not available yet, retrying in ${RETRY_DELAY}s..."
         sleep "$RETRY_DELAY"
     done
 }
 
 ensure_dag_unpaused() {
-    log "Ensuring DAG ${DAG_ID} is unpaused..."
-    airflow dags unpause "$DAG_ID" >/dev/null
+    local dag_id="$1"
+    log "Ensuring DAG ${dag_id} is unpaused..."
+    airflow dags unpause "$dag_id" >/dev/null
 
-    if ! dag_is_unpaused; then
-        fail "DAG ${DAG_ID} is still paused after the unpause command."
+    if ! dag_is_unpaused "$dag_id"; then
+        fail "DAG ${dag_id} is still paused after the unpause command."
     fi
 
-    log "DAG ${DAG_ID} is unpaused."
+    log "DAG ${dag_id} is unpaused."
 }
 
-main() {
+trigger_startup_dag() {
+    local dag_id="$1"
+    local startup_id="$2"
     local claim_output
     local claim_status
     local trigger_error
+    local run_id="startup__${startup_id}"
 
-    wait_for_airflow_db
-    wait_for_dag_discovery
-    ensure_dag_unpaused
-
-    STARTUP_ID="${AIRFLOW_STARTUP_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
-    RUN_ID="startup__${STARTUP_ID}"
-
-    log "Prepared startup trigger identifiers: startup_id=${STARTUP_ID} run_id=${RUN_ID}"
+    log "Prepared startup trigger identifiers for dag=${dag_id}: startup_id=${startup_id} run_id=${run_id}"
 
     set +e
     claim_output="$(
         "$PYTHON_BIN" -m job_matcher.startup_trigger claim \
-            --dag-id "$DAG_ID" \
-            --startup-id "$STARTUP_ID" \
-            --run-id "$RUN_ID"
+            --dag-id "$dag_id" \
+            --startup-id "$startup_id" \
+            --run-id "$run_id"
     )"
     claim_status=$?
     set -e
@@ -135,30 +137,48 @@ main() {
     if [ "$claim_status" -eq 0 ]; then
         log "Startup claim acquired: ${claim_output}"
     elif [ "$claim_status" -eq 10 ]; then
-        log "Startup already claimed for dag=${DAG_ID} startup_id=${STARTUP_ID}: ${claim_output}"
-        exit 0
+        log "Startup already claimed for dag=${dag_id} startup_id=${startup_id}: ${claim_output}"
+        return 0
     else
-        fail "Unable to claim startup trigger slot for dag=${DAG_ID} startup_id=${STARTUP_ID}."
+        fail "Unable to claim startup trigger slot for dag=${dag_id} startup_id=${startup_id}."
     fi
 
-    log "Triggering DAG ${DAG_ID} with run_id ${RUN_ID}..."
+    log "Triggering DAG ${dag_id} with run_id ${run_id}..."
 
-    if airflow dags trigger --run-id "$RUN_ID" "$DAG_ID"; then
+    if airflow dags trigger --run-id "$run_id" "$dag_id"; then
         "$PYTHON_BIN" -m job_matcher.startup_trigger mark-status \
-            --dag-id "$DAG_ID" \
-            --startup-id "$STARTUP_ID" \
+            --dag-id "$dag_id" \
+            --startup-id "$startup_id" \
             --status triggered >/dev/null
-        log "DAG ${DAG_ID} triggered successfully."
-        exit 0
+        log "DAG ${dag_id} triggered successfully."
+        return 0
     fi
 
-    trigger_error="airflow dags trigger failed for dag=${DAG_ID} run_id=${RUN_ID}"
+    trigger_error="airflow dags trigger failed for dag=${dag_id} run_id=${run_id}"
     "$PYTHON_BIN" -m job_matcher.startup_trigger mark-status \
-        --dag-id "$DAG_ID" \
-        --startup-id "$STARTUP_ID" \
+        --dag-id "$dag_id" \
+        --startup-id "$startup_id" \
         --status failed \
         --last-error "$trigger_error" >/dev/null
     fail "$trigger_error"
+}
+
+main() {
+    local startup_id
+    local dag_id
+
+    if [ "${#DAG_IDS[@]}" -eq 0 ]; then
+        fail "No startup DAG IDs were configured."
+    fi
+
+    wait_for_airflow_db
+    startup_id="${AIRFLOW_STARTUP_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+
+    for dag_id in "${DAG_IDS[@]}"; do
+        wait_for_dag_discovery "$dag_id"
+        ensure_dag_unpaused "$dag_id"
+        trigger_startup_dag "$dag_id" "$startup_id"
+    done
 }
 
 main "$@"

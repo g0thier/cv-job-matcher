@@ -63,4 +63,34 @@ def ensure_database(settings: Settings | None = None) -> None:
     with engine.begin() as connection:
         connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE job_offers ADD COLUMN IF NOT EXISTS source TEXT")
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE job_offers
+                SET source = 'etat_geneve'
+                WHERE source IS NULL
+                  AND canonical_url LIKE '%ge.ch/offres-emploi-etat-geneve/%'
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE job_offers
+                SET source = 'linkedin'
+                WHERE source IS NULL
+                  AND canonical_url LIKE '%linkedin.com/%'
+                """
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_job_offers_source "
+                "ON job_offers (source)"
+            )
+        )
     engine.dispose()

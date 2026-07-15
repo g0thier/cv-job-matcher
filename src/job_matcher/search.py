@@ -17,6 +17,7 @@ from job_matcher.text_utils import chunk_text, utcnow
 @dataclass
 class SearchResult:
     canonical_url: str
+    source: str | None
     title: str | None
     company: str | None
     location: str | None
@@ -46,6 +47,7 @@ def _rank_jobs_by_title(
         stmt = (
             select(
                 JobOffer.canonical_url,
+                JobOffer.source,
                 JobOffer.title,
                 JobOffer.company,
                 JobOffer.location,
@@ -63,6 +65,7 @@ def _rank_jobs_by_title(
             if current is None or score > current["title_score"]:
                 per_job_titles[row.canonical_url] = {
                     "canonical_url": row.canonical_url,
+                    "source": row.source,
                     "title": row.title,
                     "company": row.company,
                     "location": row.location,
@@ -108,6 +111,7 @@ def search_jobs_for_cv(
 
         per_job_matches: dict[str, dict] = {
             job["canonical_url"]: {
+                "source": job["source"],
                 "title": job["title"],
                 "company": job["company"],
                 "location": job["location"],
@@ -125,6 +129,7 @@ def search_jobs_for_cv(
         if not candidate_urls:
             per_job_matches = defaultdict(
                 lambda: {
+                    "source": None,
                     "title": None,
                     "company": None,
                     "location": None,
@@ -144,6 +149,7 @@ def search_jobs_for_cv(
             stmt = (
                 select(
                     JobOffer.canonical_url,
+                    JobOffer.source,
                     JobOffer.title,
                     JobOffer.company,
                     JobOffer.location,
@@ -162,6 +168,7 @@ def search_jobs_for_cv(
             for row in session.execute(stmt):
                 job_state = per_job_matches[row.canonical_url]
                 if job_state["title"] is None:
+                    job_state["source"] = row.source
                     job_state["title"] = row.title
                     job_state["company"] = row.company
                     job_state["location"] = row.location
@@ -206,6 +213,7 @@ def search_jobs_for_cv(
         results.append(
             SearchResult(
                 canonical_url=canonical_url,
+                source=job_state["source"],
                 title=job_state["title"],
                 company=job_state["company"],
                 location=job_state["location"],
