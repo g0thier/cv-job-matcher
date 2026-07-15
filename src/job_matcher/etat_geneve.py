@@ -728,8 +728,10 @@ def build_job_paragraphs(
         description = row.get("description_text")
         if pd.isna(description):
             description = ""
+        description = re.sub(r"\s*•\s*", "; ", str(description))
+        description = re.sub(r"\s+", " ", description).strip()
         paragraphs = split_paragraphs(
-            str(description),
+            description,
             min_chars=active_settings.paragraph_min_chars,
         )
         for index, paragraph in enumerate(paragraphs):

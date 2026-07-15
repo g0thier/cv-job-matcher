@@ -7,12 +7,18 @@ from types import SimpleNamespace
 import types
 import unittest
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from job_matcher.etat_geneve import parse_geneva_date  # noqa: E402
+from job_matcher.etat_geneve import (  # noqa: E402
+    build_job_paragraphs,
+    parse_geneva_date,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 class EtatGeneveDateParsingTests(unittest.TestCase):
     def test_parses_french_and_numeric_dates_in_local_timezone(self) -> None:
@@ -25,6 +31,34 @@ class EtatGeneveDateParsingTests(unittest.TestCase):
 
         self.assertEqual(published.isoformat(), "2026-07-15T00:00:00+02:00")
         self.assertEqual(deadline.isoformat(), "2026-07-31T23:59:59+02:00")
+
+
+class EtatGeneveParagraphTests(unittest.TestCase):
+    def test_groups_sections_like_linkedin_description(self) -> None:
+        offers = pd.DataFrame(
+            [
+                {
+                    "final_url": "https://example.test/jobs/geneva-1",
+                    "final_job_id": "geneva-1",
+                    "description_text": (
+                        "Votre mission\n\n"
+                        "Assurer le suivi administratif des dossiers avec qualité.\n\n"
+                        "• Coordonner les échanges avec les différents partenaires.\n\n"
+                        "Votre profil\n\n"
+                        "Disposer d'une solide organisation et apprécier le travail en équipe."
+                    ),
+                }
+            ]
+        )
+        settings = SimpleNamespace(paragraph_min_chars=40)
+
+        paragraphs = build_job_paragraphs(offers, settings)
+
+        self.assertEqual(len(paragraphs), 1)
+        paragraph = paragraphs.iloc[0]["paragraph"]
+        self.assertNotIn("\n", paragraph)
+        self.assertIn("Votre mission", paragraph)
+        self.assertIn("Votre profil", paragraph)
 
 
 def _load_dag(filename: str):
