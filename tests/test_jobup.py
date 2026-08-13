@@ -130,6 +130,8 @@ class JobUpSearchTests(unittest.TestCase):
             result.loc[result["job_id"] == "shared-id", "url"].iloc[0],
             "https://www.jobup.ch/fr/emplois/detail/shared-id",
         )
+        self.assertEqual(set(result["employment_type"]), {"5"})
+        self.assertFalse(result["employment_type"].str.startswith("[").any())
 
     def test_canonical_url_removes_query_fragment_and_trailing_slash(self) -> None:
         self.assertEqual(
@@ -207,6 +209,36 @@ class JobUpDetailTests(unittest.TestCase):
         self.assertIn("pipelines de données", parsed["description_text"])
         self.assertIn("vacancy_description_json_ld", parsed["source_parser"])
 
+    def test_normalizes_employment_type_to_text(self) -> None:
+        cases = (
+            ("  FULL_TIME  ", "FULL_TIME"),
+            ([None, "", " PART_TIME ", "FULL_TIME"], "PART_TIME"),
+            ([], ""),
+            (None, ""),
+            ([None, 42, {"name": "FULL_TIME"}], ""),
+        )
+
+        for value, expected in cases:
+            with self.subTest(value=value):
+                html = self.html.replace(
+                    '"employmentType": "FULL_TIME"',
+                    f'"employmentType": {json.dumps(value)}',
+                )
+
+                parsed = parse_job_detail_html(html)
+
+                self.assertEqual(parsed["employment_type_detail"], expected)
+
+    def test_missing_employment_type_is_empty_text(self) -> None:
+        html = self.html.replace(
+            '            "employmentType": "FULL_TIME",\n',
+            "",
+        )
+
+        parsed = parse_job_detail_html(html)
+
+        self.assertEqual(parsed["employment_type_detail"], "")
+
     def test_collect_details_records_one_error_and_continues(self) -> None:
         class DetailSession:
             def __init__(inner_self) -> None:
@@ -252,7 +284,7 @@ class JobUpDetailTests(unittest.TestCase):
             "url": canonicalize_jobup_job_url(job_id=document["id"]),
             "list_date": document["publicationDate"],
             "initial_publication_date": document["initialPublicationDate"],
-            "employment_type": json.dumps(document["employmentTypeIds"]),
+            "employment_type": document["employmentTypeIds"][0],
             "address_country": "CH",
             "address_locality": "Genève",
             "address_region": "GE",
@@ -290,9 +322,39 @@ class JobUpDetailTests(unittest.TestCase):
             offers.iloc[0]["date_posted_dt"].isoformat(),
             "2026-08-13T08:15:00+02:00",
         )
+        self.assertEqual(offers.iloc[0]["employment_type"], "FULL_TIME")
+        self.assertIsInstance(offers.iloc[0]["employment_type"], str)
         criteria = json.loads(offers.iloc[0]["criteria_json"])
         self.assertEqual(criteria["search"]["employmentGrades"], [80, 100])
         self.assertEqual(len(paragraphs), 1)
+
+    def test_groups_jobup_description_into_one_complete_paragraph(self) -> None:
+        offers = pd.DataFrame(
+            [
+                {
+                    "final_url": "https://example.test/jobs/jobup-1",
+                    "final_job_id": "jobup-1",
+                    "description_text": (
+                        "Votre mission\n\n"
+                        "Construire des pipelines de données robustes pour les utilisateurs.\n\n"
+                        "• Collaborer avec les équipes produit et infrastructure.\n\n"
+                        "Votre profil\n\n"
+                        "Maîtriser Python et SQL dans un environnement de production."
+                    ),
+                }
+            ]
+        )
+        settings = SimpleNamespace(paragraph_min_chars=40)
+
+        paragraphs = build_job_paragraphs(offers, settings)
+
+        self.assertEqual(len(paragraphs), 1)
+        paragraph = paragraphs.iloc[0]["paragraph"]
+        self.assertNotIn("\n", paragraph)
+        self.assertIn("Votre mission", paragraph)
+        self.assertIn("Collaborer avec les équipes", paragraph)
+        self.assertIn("Maîtriser Python et SQL", paragraph)
+        self.assertEqual(paragraphs.iloc[0]["paragraph_chars"], len(paragraph))
 
 
 def _load_dag(filename: str):

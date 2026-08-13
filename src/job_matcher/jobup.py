@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -53,7 +54,7 @@ DETAIL_DEFAULTS: dict[str, Any] = {
     "company_detail": None,
     "location_detail": None,
     "valid_through": None,
-    "employment_type_detail": None,
+    "employment_type_detail": "",
     "industry": None,
     "skills": None,
     "education_requirements": None,
@@ -157,6 +158,16 @@ def _first_location(document: dict[str, Any]) -> dict[str, Any]:
     return locations[0] if locations and isinstance(locations[0], dict) else {}
 
 
+def _normalize_employment_type(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, str) and (text := item.strip()):
+                return text
+    return ""
+
+
 def _document_to_row(
     document: dict[str, Any],
     search_url: str,
@@ -197,11 +208,7 @@ def _document_to_row(
         "url": canonicalize_jobup_job_url(job_id=job_id),
         "list_date": document.get("publicationDate"),
         "initial_publication_date": document.get("initialPublicationDate"),
-        "employment_type": (
-            json.dumps(employment_type_ids, ensure_ascii=False)
-            if employment_type_ids
-            else None
-        ),
+        "employment_type": _normalize_employment_type(employment_type_ids),
         "address_country": address.get("countryCode"),
         "address_locality": address.get("city"),
         "address_region": address.get("cantonCode"),
@@ -402,7 +409,9 @@ def parse_job_detail_html(
         if value
     ) or None
     data["valid_through"] = posting.get("validThrough")
-    data["employment_type_detail"] = posting.get("employmentType")
+    data["employment_type_detail"] = _normalize_employment_type(
+        posting.get("employmentType")
+    )
     data["industry"] = posting.get("industry")
     data["skills"] = posting.get("skills")
     data["education_requirements"] = posting.get("educationRequirements")
@@ -536,6 +545,10 @@ def prepare_offers_dataframe(
             merged[target]
         )
 
+    merged["employment_type"] = merged["employment_type"].apply(
+        _normalize_employment_type
+    )
+
     merged["final_job_id"] = merged["job_id"].fillna(merged["job_id_detail"])
     merged["final_url"] = merged["canonical_url"].fillna(merged["url"])
     merged["final_title"] = merged["title_detail"].replace("", pd.NA).fillna(
@@ -576,8 +589,10 @@ def build_job_paragraphs(
         description = row.get("description_text")
         if pd.isna(description):
             description = ""
+        description = re.sub(r"\s*•\s*", "; ", str(description))
+        description = re.sub(r"\s+", " ", description).strip()
         paragraphs = split_paragraphs(
-            str(description),
+            description,
             min_chars=active_settings.paragraph_min_chars,
         )
         for index, paragraph in enumerate(paragraphs):
