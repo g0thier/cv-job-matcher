@@ -26,6 +26,12 @@ from job_matcher.linkedin import (
     collect_search_results,
     prepare_offers_dataframe,
 )
+from job_matcher.jobup import (
+    build_job_paragraphs as build_jobup_job_paragraphs,
+    collect_job_details as collect_jobup_job_details,
+    collect_search_results as collect_jobup_search_results,
+    prepare_offers_dataframe as prepare_jobup_offers_dataframe,
+)
 from job_matcher.models import JobOffer, JobParagraph
 from job_matcher.text_utils import utcnow
 
@@ -171,6 +177,38 @@ def collect_etat_geneve_feed_step(
     }
 
 
+def collect_jobup_search_results_step(
+    run_key: str,
+    publication_date_from: str,
+    publication_date_to: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    active_settings = settings or get_settings()
+    run_dir = get_run_directory(run_key)
+    logger.info(
+        "Collecting JobUp jobs for window %s -> %s",
+        publication_date_from,
+        publication_date_to,
+    )
+    jobs_df = collect_jobup_search_results(
+        publication_date_from,
+        publication_date_to,
+        active_settings,
+    )
+    jobs_path = run_dir / "jobup_jobs.pkl"
+    _write_dataframe(jobs_df, jobs_path)
+    logger.info(
+        "Collected %s unique JobUp jobs and saved them to %s",
+        len(jobs_df),
+        jobs_path,
+    )
+    return {
+        "run_key": run_key,
+        "jobs_path": str(jobs_path),
+        "jobs_count": int(len(jobs_df)),
+    }
+
+
 def filter_existing_jobs_step(
     run_key: str, jobs_path: str, settings: Settings | None = None
 ) -> dict[str, Any]:
@@ -286,6 +324,45 @@ def collect_etat_geneve_job_details_step(
     }
 
 
+def collect_jobup_job_details_step(
+    run_key: str,
+    jobs_path: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    active_settings = settings or get_settings()
+    run_dir = get_run_directory(run_key)
+    jobs_df = _read_dataframe(jobs_path)
+    logger.info("Collecting details for %s JobUp jobs", len(jobs_df))
+    details_df = collect_jobup_job_details(jobs_df, active_settings)
+    details_path = run_dir / "jobup_details.pkl"
+    _write_dataframe(details_df, details_path)
+    status_counts = (
+        details_df["detail_status"].fillna("missing").value_counts().to_dict()
+        if not details_df.empty and "detail_status" in details_df
+        else {}
+    )
+    logger.info(
+        "Collected %s JobUp detail pages with status distribution: %s",
+        len(details_df),
+        status_counts,
+    )
+    if not details_df.empty and "detail_error" in details_df:
+        errors = details_df[details_df["detail_error"].notna()][
+            ["canonical_url", "detail_error"]
+        ].head(5)
+        if not errors.empty:
+            logger.warning(
+                "Sample JobUp detail errors: %s",
+                errors.to_dict(orient="records"),
+            )
+    return {
+        "run_key": run_key,
+        "jobs_path": jobs_path,
+        "details_path": str(details_path),
+        "details_count": int(len(details_df)),
+    }
+
+
 def prepare_dataframes_step(
     run_key: str,
     jobs_path: str,
@@ -360,6 +437,45 @@ def prepare_etat_geneve_dataframes_step(
     _write_dataframe(paragraphs_df, paragraphs_path)
     logger.info(
         "Prepared %s État de Genève offers and %s paragraphs",
+        len(offers_df),
+        len(paragraphs_df),
+    )
+    return {
+        "run_key": run_key,
+        "offers_path": str(offers_path),
+        "paragraphs_path": str(paragraphs_path),
+        "offers_count": int(len(offers_df)),
+        "paragraphs_count": int(len(paragraphs_df)),
+    }
+
+
+def prepare_jobup_dataframes_step(
+    run_key: str,
+    jobs_path: str,
+    details_path: str,
+    settings: Settings | None = None,
+) -> dict[str, Any]:
+    active_settings = settings or get_settings()
+    run_dir = get_run_directory(run_key)
+    jobs_df = _read_dataframe(jobs_path)
+    details_df = _read_dataframe(details_path)
+    offers_df = prepare_jobup_offers_dataframe(
+        jobs_df,
+        details_df,
+        active_settings,
+    )
+    if not offers_df.empty:
+        offers_df = offers_df.drop_duplicates(subset=["final_url"]).reset_index(
+            drop=True
+        )
+    paragraphs_df = build_jobup_job_paragraphs(offers_df, active_settings)
+
+    offers_path = run_dir / "jobup_offers.pkl"
+    paragraphs_path = run_dir / "jobup_paragraphs.pkl"
+    _write_dataframe(offers_df, offers_path)
+    _write_dataframe(paragraphs_df, paragraphs_path)
+    logger.info(
+        "Prepared %s JobUp offers and %s paragraphs",
         len(offers_df),
         len(paragraphs_df),
     )

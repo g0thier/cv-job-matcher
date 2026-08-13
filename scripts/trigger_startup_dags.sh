@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-DEFAULT_DAG_IDS="linkedin_jobs_ingestion_startup,etat_geneve_jobs_ingestion_startup"
+DEFAULT_DAG_IDS="linkedin_jobs_ingestion_startup,etat_geneve_jobs_ingestion_startup,jobup_jobs_ingestion_startup"
 RAW_DAG_IDS="${STARTUP_DAG_IDS:-${STARTUP_DAG_ID:-$DEFAULT_DAG_IDS}}"
 read -r -a DAG_IDS <<< "${RAW_DAG_IDS//,/ }"
 MAX_ATTEMPTS="${STARTUP_DAG_MAX_ATTEMPTS:-30}"

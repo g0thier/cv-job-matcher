@@ -7,10 +7,12 @@ from job_matcher.search import search_jobs_for_cv
 SOURCE_LABELS = {
     "linkedin": "LinkedIn",
     "etat_geneve": "État de Genève",
+    "jobup": "JobUp",
 }
 SOURCE_ICONS = {
     "linkedin": "app/static/source-icons/linkedin.png",
     "etat_geneve": "app/static/source-icons/etat-geneve.png",
+    "jobup": "app/static/source-icons/jobup.png",
 }
 
 

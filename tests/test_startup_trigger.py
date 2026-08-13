@@ -276,10 +276,11 @@ class StartupTriggerScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertEqual(result.state["last_trigger_run_id"], "startup__shared-startup")
 
-    def test_script_triggers_linkedin_and_etat_geneve_startup_dags(self) -> None:
+    def test_script_triggers_all_default_startup_dags(self) -> None:
         dag_ids = (
             "linkedin_jobs_ingestion_startup,"
-            "etat_geneve_jobs_ingestion_startup"
+            "etat_geneve_jobs_ingestion_startup,"
+            "jobup_jobs_ingestion_startup"
         )
         result = self._run_script(
             {
@@ -295,6 +296,7 @@ class StartupTriggerScriptTests(unittest.TestCase):
             [
                 "linkedin_jobs_ingestion_startup",
                 "etat_geneve_jobs_ingestion_startup",
+                "jobup_jobs_ingestion_startup",
             ],
         )
 
@@ -376,6 +378,13 @@ class DeploymentConfigurationTests(unittest.TestCase):
         self.assertIn('command: ["bash", "/opt/project/scripts/trigger_startup_dags.sh"]', compose_text)
         scheduler_block = compose_text.split("airflow-scheduler:")[1].split("airflow-startup-trigger:")[0]
         self.assertNotIn("trigger_startup_dags.sh", scheduler_block)
+
+    def test_jobup_startup_dag_is_enabled_by_default(self) -> None:
+        expected_dag = "jobup_jobs_ingestion_startup"
+
+        self.assertIn(expected_dag, SCRIPT_PATH.read_text())
+        self.assertIn(expected_dag, (REPO_ROOT / "docker-compose.yml").read_text())
+        self.assertIn(expected_dag, (REPO_ROOT / ".env.example").read_text())
 
 
 if __name__ == "__main__":

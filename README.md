@@ -2,9 +2,9 @@
 
 ## Description
 
-LinkedIn and État de Genève job ingestion and search pipeline built with `Airflow`, `PostgreSQL + pgvector`, `Playwright`, and `Streamlit`, with default LinkedIn search mappings for Geneva and Lausanne.
+LinkedIn, JobUp, and État de Genève job ingestion and search pipeline built with `Airflow`, `PostgreSQL + pgvector`, `Playwright`, and `Streamlit`, with searches for Geneva and Lausanne.
 
-The project collects public LinkedIn job offers around Geneva and Lausanne as well as the État de Genève RSS job feed, extracts useful details, splits descriptions into paragraphs, computes embeddings, stores everything in a shared database, and compares a PDF resume against the closest opportunities.
+The project collects public LinkedIn and JobUp offers around Geneva and Lausanne as well as the État de Genève RSS job feed, extracts useful details, splits descriptions into paragraphs, computes embeddings, stores everything in a shared database, and compares a PDF resume against the closest opportunities.
 
 ![Capture](/docs/images/Capture.png)
 
@@ -31,7 +31,7 @@ The project collects public LinkedIn job offers around Geneva and Lausanne as we
 
 ## 🎯 Objective of the project
 
-Automate public LinkedIn and État de Genève job collection and accelerate semantic matching between a resume and recent opportunities.
+Automate public LinkedIn, JobUp, and État de Genève job collection and accelerate semantic matching between a resume and recent opportunities.
 
 ## 👥 Target audience
 
@@ -50,7 +50,7 @@ Automate public LinkedIn and État de Genève job collection and accelerate sema
   - `LICENSE.md`
   - `SECURITY.md`
 - A Streamlit interface via [`streamlit_app.py`](/Users/gauthier/Desktop/cron_job/streamlit_app.py)
-- Airflow orchestration for LinkedIn and État de Genève via the `dags/` directory
+- Airflow orchestration for LinkedIn, JobUp, and État de Genève via the `dags/` directory
 - A Python application layer in [`src/job_matcher/`](/Users/gauthier/Desktop/cron_job/src/job_matcher)
 - LinkedIn search configuration in [`config/linkedin_searches.json`](/Users/gauthier/Desktop/cron_job/config/linkedin_searches.json)
 
@@ -76,6 +76,8 @@ cron_job/
 ├── dags/
 │   ├── etat_geneve_jobs_ingestion.py
 │   ├── etat_geneve_jobs_ingestion_startup.py
+│   ├── jobup_jobs_ingestion.py
+│   ├── jobup_jobs_ingestion_startup.py
 │   ├── linkedin_jobs_ingestion.py
 │   └── linkedin_jobs_ingestion_startup.py
 ├── runtime/
@@ -83,6 +85,7 @@ cron_job/
 ├── static/
 │   └── source-icons/
 │       ├── etat-geneve.png
+│       ├── jobup.png
 │       └── linkedin.png
 ├── src/
 │   └── job_matcher/
@@ -92,6 +95,7 @@ cron_job/
 │       ├── database.py
 │       ├── embeddings.py
 │       ├── etat_geneve.py
+│       ├── jobup.py
 │       ├── linkedin.py
 │       ├── models.py
 │       ├── pipeline.py
@@ -167,11 +171,11 @@ Default Airflow credentials from `.env.example`:
 
 ### Airflow startup DAG
 
-The repository includes `linkedin_jobs_ingestion_startup` and `etat_geneve_jobs_ingestion_startup` for one ingestion run per source and per Airflow environment startup.
+The repository includes `linkedin_jobs_ingestion_startup`, `etat_geneve_jobs_ingestion_startup`, and `jobup_jobs_ingestion_startup` for one ingestion run per source and per Airflow environment startup. The scheduled `jobup_jobs_ingestion` DAG runs every 15 minutes; both JobUp DAGs query Geneva (`regionIds=34`) and Lausanne (`regionIds=55`) separately.
 
-- Both startup DAGs use `schedule=None`, so they are not scheduled by Airflow and remain manually triggerable.
+- All startup DAGs use `schedule=None`, so they are not scheduled by Airflow and remain manually triggerable.
 - This replaces `schedule="@once"`, which only fires once for a DAG as long as a prior `DagRun` already exists.
-- Automatic startup triggering is handled outside DAG parsing by the dedicated Docker Compose service `airflow-startup-trigger`, which triggers both startup DAGs by default.
+- Automatic startup triggering is handled outside DAG parsing by the dedicated Docker Compose service `airflow-startup-trigger`, which triggers all startup DAGs by default.
 - The trigger entrypoint lives at `scripts/trigger_startup_dags.sh` and waits for the Airflow metadata database, waits for each DAG discovery, unpauses each DAG, claims the logical startup in the shared database, and then triggers it.
 
 Startup trigger environment variables:
@@ -191,6 +195,10 @@ airflow dags trigger \
 airflow dags trigger \
     --run-id "manual__$(date -u +%Y%m%dT%H%M%SZ)" \
     etat_geneve_jobs_ingestion_startup
+
+airflow dags trigger \
+    --run-id "manual__$(date -u +%Y%m%dT%H%M%SZ)" \
+    jobup_jobs_ingestion_startup
 ```
 
 Diagnostics when the startup DAG does not run:
@@ -202,7 +210,7 @@ Diagnostics when the startup DAG does not run:
 
 Current idempotence notes for repeated startup runs:
 
-- LinkedIn search results and État de Genève feed entries are deduplicated before persistence.
+- LinkedIn and JobUp search results and État de Genève feed entries are deduplicated before persistence.
 - Prepared offers are deduplicated on `final_url`.
 - Persistence skips existing `canonical_url` values already stored in Postgres and same-batch duplicates.
 - `persist_offers_step` commits in one database transaction, so partial writes from that step are rolled back on failure.
