@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
@@ -18,6 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from job_matcher.indeed import (  # noqa: E402
     INDEED_LOCATIONS,
     _solve_captcha,
+    _start_browser,
+    _stop_browser,
     build_job_paragraphs,
     build_scheduled_window,
     build_search_url,
@@ -175,6 +179,98 @@ class FakeBrowser:
 
     def stop(self):
         self.stopped = True
+
+
+class IndeedBrowserStartupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_retries_with_a_fresh_profile_for_each_launch(self) -> None:
+        calls: list[dict] = []
+        browser = FakeBrowser(lambda url: FakePage(url, "<html></html>"))
+
+        def browser_factory(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise RuntimeError("Failed to connect to the browser")
+            return browser
+
+        with TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {
+                "AIRFLOW_CTX_TASK_ID": "collect_jobs",
+                "AIRFLOW_CTX_TRY_NUMBER": "2",
+            },
+        ):
+            result = await _start_browser(
+                Path(temp_dir),
+                browser_factory,
+                sleep=no_sleep,
+            )
+
+        self.assertIs(result, browser)
+        self.assertEqual(len(calls), 2)
+        profile_paths = [Path(call["user_data_dir"]) for call in calls]
+        self.assertNotEqual(profile_paths[0], profile_paths[1])
+        self.assertIn("collect_jobs_try_2_launch_1", profile_paths[0].name)
+        self.assertIn("collect_jobs_try_2_launch_2", profile_paths[1].name)
+
+    async def test_does_not_retry_a_non_transient_startup_error(self) -> None:
+        calls = 0
+
+        def browser_factory(**_kwargs):
+            nonlocal calls
+            calls += 1
+            raise ValueError("invalid browser configuration")
+
+        with TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "invalid browser configuration"):
+                await _start_browser(
+                    Path(temp_dir),
+                    browser_factory,
+                    sleep=no_sleep,
+                )
+
+        self.assertEqual(calls, 1)
+
+    async def test_cancellation_removes_the_partial_profile(self) -> None:
+        def browser_factory(**_kwargs):
+            raise asyncio.CancelledError
+
+        with TemporaryDirectory() as temp_dir:
+            run_directory = Path(temp_dir)
+            with self.assertRaises(asyncio.CancelledError):
+                await _start_browser(
+                    run_directory,
+                    browser_factory,
+                    sleep=no_sleep,
+                )
+
+            self.assertEqual(list(run_directory.iterdir()), [])
+
+    async def test_stops_the_browser_display_and_registry_entry(self) -> None:
+        class FakeDisplay:
+            def __init__(self):
+                self.stopped = False
+
+            def stop(self):
+                self.stopped = True
+
+        browser = FakeBrowser(lambda url: FakePage(url, "<html></html>"))
+        display = FakeDisplay()
+        registry = {browser}
+        browser._indeed_virtual_display = display
+        browser._indeed_registry = registry
+        with TemporaryDirectory() as temp_dir:
+            profile_directory = Path(temp_dir) / "profile"
+            profile_directory.mkdir()
+            (profile_directory / "SingletonLock").touch()
+            browser._indeed_profile_directory = profile_directory
+
+            await _stop_browser(browser)
+
+            self.assertFalse(profile_directory.exists())
+
+        self.assertTrue(browser.stopped)
+        self.assertTrue(display.stopped)
+        self.assertNotIn(browser, registry)
 
 
 class IndeedWindowTests(unittest.TestCase):

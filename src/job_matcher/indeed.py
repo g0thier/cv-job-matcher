@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
 import unicodedata
 from datetime import datetime, timedelta
@@ -35,6 +36,9 @@ INDEED_SCHEDULE_MINUTES = 15
 INDEED_OVERLAP_MINUTES = 5
 SEARCH_LOAD_ATTEMPTS = 4
 DETAIL_LOAD_ATTEMPTS = 6
+BROWSER_START_ATTEMPTS = 3
+BROWSER_START_BACKOFF_SECONDS = 1.0
+BROWSER_STOP_TIMEOUT_SECONDS = 2.0
 SOURCE_NAME = "indeed"
 
 CAPTCHA_MARKERS = (
@@ -432,42 +436,231 @@ async def _resolve_chromium_executable() -> str | None:
     return str(path) if path.is_file() else None
 
 
+def _browser_profile_directory(run_directory: Path, launch_attempt: int) -> Path:
+    task_id = re.sub(
+        r"[^A-Za-z0-9_.-]+",
+        "_",
+        os.getenv("AIRFLOW_CTX_TASK_ID", "local"),
+    ).strip("_") or "local"
+    try_number = re.sub(
+        r"[^A-Za-z0-9_.-]+",
+        "_",
+        os.getenv("AIRFLOW_CTX_TRY_NUMBER", "1"),
+    ).strip("_") or "1"
+    return run_directory / (
+        f"indeed_browser_profile_{task_id}_try_{try_number}_launch_{launch_attempt}"
+    )
+
+
+def _is_retryable_browser_start_error(error: Exception) -> bool:
+    message = str(error).casefold()
+    return isinstance(error, (ConnectionError, OSError, TimeoutError)) or any(
+        marker in message
+        for marker in (
+            "failed to connect to the browser",
+            "connection refused",
+            "browser closed",
+        )
+    )
+
+
+async def _cleanup_failed_browser_instances(
+    instances: set[Any],
+    registry: set[Any],
+) -> bool:
+    all_stopped = True
+    for instance in instances:
+        try:
+            await _terminate_browser_process(instance, log_stderr=True)
+        except Exception:
+            all_stopped = False
+            logger.exception("Unable to clean up a failed Chromium process")
+        finally:
+            registry.discard(instance)
+    return all_stopped
+
+
+async def _terminate_browser_process(
+    browser: Any,
+    *,
+    log_stderr: bool,
+) -> None:
+    process = getattr(browser, "_process", None)
+    if process is None:
+        return
+    if process.returncode is None:
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+    try:
+        _stdout, stderr = await asyncio.wait_for(
+            process.communicate(),
+            timeout=BROWSER_STOP_TIMEOUT_SECONDS,
+        )
+    except asyncio.CancelledError:
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        raise
+    except TimeoutError:
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            _stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=BROWSER_STOP_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as error:
+            raise RuntimeError(
+                "Chromium did not terminate after being killed"
+            ) from error
+    if log_stderr and stderr:
+        stderr_text = stderr.decode("utf-8", errors="replace").strip()
+        if stderr_text:
+            logger.warning("Chromium startup stderr:\n%s", stderr_text[-4000:])
+
+
+def _start_virtual_display() -> Any:
+    from sbvirtualdisplay import Display
+
+    display = Display(visible=0, size=(1366, 840))
+    display.start()
+    return display
+
+
+def _stop_virtual_display(display: Any) -> None:
+    if display is None:
+        return
+    try:
+        display.stop()
+    except Exception:
+        logger.exception("Unable to stop the Indeed Xvfb display")
+
+
+def _remove_browser_profile(profile_directory: Path | None) -> None:
+    if profile_directory is None:
+        return
+    try:
+        shutil.rmtree(profile_directory)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.exception(
+            "Unable to remove the Indeed browser profile %s",
+            profile_directory,
+        )
+
+
 async def _start_browser(
     run_directory: Path,
     browser_factory: BrowserFactory | None,
+    sleep: SleepCallable = asyncio.sleep,
 ):
-    profile_directory = run_directory / "indeed_browser_profile"
-    profile_directory.mkdir(parents=True, exist_ok=True)
-    kwargs = {
-        "headless": False,
-        "xvfb": sys.platform.startswith("linux"),
-        "user_data_dir": str(profile_directory),
-        "lang": "fr-CH",
-    }
-    if sys.platform.startswith("linux"):
-        kwargs["sandbox"] = False
+    executable = None
+    registry: set[Any] | None = None
+    if browser_factory is None:
+        from seleniumbase.undetected.cdp_driver import cdp_util
+        from seleniumbase.undetected.cdp_driver.browser import (
+            get_registered_instances,
+        )
 
-    if browser_factory is not None:
-        browser = browser_factory(**kwargs)
-        return await browser if inspect.isawaitable(browser) else browser
+        executable = await _resolve_chromium_executable()
+        registry = get_registered_instances()
 
-    from seleniumbase.undetected.cdp_driver import cdp_util
+    for launch_attempt in range(1, BROWSER_START_ATTEMPTS + 1):
+        profile_directory = _browser_profile_directory(
+            run_directory,
+            launch_attempt,
+        )
+        profile_directory.mkdir(parents=True, exist_ok=True)
+        kwargs = {
+            "headless": False,
+            "xvfb": sys.platform.startswith("linux"),
+            "user_data_dir": str(profile_directory),
+            "lang": "fr-CH",
+        }
+        if sys.platform.startswith("linux"):
+            kwargs["sandbox"] = False
+        if executable:
+            kwargs["browser_executable_path"] = executable
 
-    executable = await _resolve_chromium_executable()
-    if executable:
-        kwargs["browser_executable_path"] = executable
-    return await cdp_util.start_async(**kwargs)
+        registered_before = set(registry or ())
+        virtual_display = None
+        try:
+            if browser_factory is not None:
+                browser = browser_factory(**kwargs)
+                return await browser if inspect.isawaitable(browser) else browser
+            if sys.platform.startswith("linux"):
+                virtual_display = _start_virtual_display()
+                kwargs["xvfb"] = False
+                kwargs["headed"] = True
+            browser = await cdp_util.start_async(**kwargs)
+            browser._indeed_virtual_display = virtual_display
+            browser._indeed_registry = registry
+            browser._indeed_profile_directory = profile_directory
+            return browser
+        except BaseException as error:
+            browser_instances_stopped = True
+            if registry is not None:
+                browser_instances_stopped = await _cleanup_failed_browser_instances(
+                    set(registry) - registered_before,
+                    registry,
+                )
+            _stop_virtual_display(virtual_display)
+            if browser_instances_stopped:
+                _remove_browser_profile(profile_directory)
+            if not isinstance(error, Exception):
+                raise
+            if (
+                launch_attempt >= BROWSER_START_ATTEMPTS
+                or not _is_retryable_browser_start_error(error)
+            ):
+                raise
+            delay = BROWSER_START_BACKOFF_SECONDS * launch_attempt
+            logger.warning(
+                "Indeed browser startup attempt %d/%d failed: %s. "
+                "Retrying in %.1f seconds with a fresh profile.",
+                launch_attempt,
+                BROWSER_START_ATTEMPTS,
+                error,
+                delay,
+            )
+            await sleep(delay)
+
+    raise RuntimeError("Indeed browser startup exhausted all attempts")
 
 
 async def _stop_browser(browser: Any) -> None:
     if browser is None:
         return
-    result = browser.stop()
-    if inspect.isawaitable(result):
-        await result
-    else:
-        # SeleniumBase 4.32 schedules its CDP connection close on this loop.
-        await asyncio.sleep(1)
+    virtual_display = getattr(browser, "_indeed_virtual_display", None)
+    registry = getattr(browser, "_indeed_registry", None)
+    profile_directory = getattr(browser, "_indeed_profile_directory", None)
+    browser_process_stopped = False
+    try:
+        try:
+            result = browser.stop()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.exception("Unable to stop the Indeed browser cleanly")
+        try:
+            await _terminate_browser_process(browser, log_stderr=False)
+            browser_process_stopped = True
+        except Exception:
+            logger.exception("Unable to terminate the Indeed Chromium process")
+    finally:
+        if registry is not None:
+            registry.discard(browser)
+        _stop_virtual_display(virtual_display)
+        if browser_process_stopped:
+            _remove_browser_profile(profile_directory)
 
 
 async def _save_screenshot(page: Any, path: Path) -> None:

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from sqlalchemy.dialects.postgresql import insert
 
 from job_matcher.config import Settings, get_settings
 from job_matcher.database import ensure_database, session_scope
@@ -747,7 +748,6 @@ def persist_offers_step(
                 collected_at=now,
                 updated_at=now,
             )
-            session.add(job_offer)
 
             job_offer.external_job_id = _normalize_scalar(row.get("final_job_id"))
             job_offer.source = _normalize_scalar(row.get("source"))
@@ -782,6 +782,23 @@ def persist_offers_step(
             if job_offer.collected_at is None:
                 job_offer.collected_at = _normalize_scalar(row.get("collected_at")) or now
 
+            job_offer_id = session.execute(
+                insert(JobOffer)
+                .values(
+                    **{
+                        column.name: getattr(job_offer, column.name)
+                        for column in JobOffer.__table__.columns
+                        if column.name != "id"
+                    }
+                )
+                .on_conflict_do_nothing(index_elements=["canonical_url"])
+                .returning(JobOffer.id)
+            ).scalar()
+            if job_offer_id is None:
+                skipped_offers += 1
+                logger.info("Skipping concurrently inserted offer: %s", canonical_url)
+                continue
+
             saved_offers += 1
 
             if paragraphs_df.empty:
@@ -791,8 +808,9 @@ def persist_offers_step(
                 paragraphs_df["canonical_url"] == canonical_url
             ].to_dict(orient="records")
             for paragraph_row in matching_rows:
-                job_offer.paragraphs.append(
+                session.add(
                     JobParagraph(
+                        job_offer_id=job_offer_id,
                         paragraph_idx=int(paragraph_row["paragraph_idx"]),
                         paragraph=paragraph_row["paragraph"],
                         paragraph_chars=int(paragraph_row["paragraph_chars"]),
