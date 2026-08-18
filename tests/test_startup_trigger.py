@@ -280,7 +280,8 @@ class StartupTriggerScriptTests(unittest.TestCase):
         dag_ids = (
             "linkedin_jobs_ingestion_startup,"
             "etat_geneve_jobs_ingestion_startup,"
-            "jobup_jobs_ingestion_startup"
+            "jobup_jobs_ingestion_startup,"
+            "indeed_jobs_ingestion_startup"
         )
         result = self._run_script(
             {
@@ -297,6 +298,7 @@ class StartupTriggerScriptTests(unittest.TestCase):
                 "linkedin_jobs_ingestion_startup",
                 "etat_geneve_jobs_ingestion_startup",
                 "jobup_jobs_ingestion_startup",
+                "indeed_jobs_ingestion_startup",
             ],
         )
 
@@ -381,6 +383,13 @@ class DeploymentConfigurationTests(unittest.TestCase):
 
     def test_jobup_startup_dag_is_enabled_by_default(self) -> None:
         expected_dag = "jobup_jobs_ingestion_startup"
+
+        self.assertIn(expected_dag, SCRIPT_PATH.read_text())
+        self.assertIn(expected_dag, (REPO_ROOT / "docker-compose.yml").read_text())
+        self.assertIn(expected_dag, (REPO_ROOT / ".env.example").read_text())
+
+    def test_indeed_startup_dag_is_enabled_by_default(self) -> None:
+        expected_dag = "indeed_jobs_ingestion_startup"
 
         self.assertIn(expected_dag, SCRIPT_PATH.read_text())
         self.assertIn(expected_dag, (REPO_ROOT / "docker-compose.yml").read_text())

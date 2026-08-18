@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Add scheduled and startup Airflow DAGs for Indeed offers around Geneva and Lausanne.
+- Add Indeed search pagination, detail extraction, date-window filtering, deduplication, vectorization, persistence, and source-specific UI support.
+- Add SeleniumBase/Xvfb browser support while reusing the Chromium installation managed by Playwright.
+
+### Changed
+
+- Pin SeleniumBase, packaging, and PyTorch releases compatible with the Airflow 2.9 dependency set.
+
 ## [1.3.0] - 2026-08-13
 
 ### Added

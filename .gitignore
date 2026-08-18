@@ -17,3 +17,4 @@ __MACOSX
 # Python
 __pycache__/
 runtime/
+downloaded_files/

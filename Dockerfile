@@ -33,6 +33,7 @@ RUN apt-get update \
         libxfixes3 \
         libxkbcommon0 \
         libxrandr2 \
+        xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /home/airflow/.cache/ms-playwright /home/airflow/.cache/huggingface \

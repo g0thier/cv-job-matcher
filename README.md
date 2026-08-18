@@ -2,9 +2,9 @@
 
 ## Description
 
-LinkedIn, JobUp, and État de Genève job ingestion and search pipeline built with `Airflow`, `PostgreSQL + pgvector`, `Playwright`, and `Streamlit`, with searches for Geneva and Lausanne.
+LinkedIn, Indeed, JobUp, and État de Genève job ingestion and search pipeline built with `Airflow`, `PostgreSQL + pgvector`, `Playwright`, `SeleniumBase`, and `Streamlit`, with searches for Geneva and Lausanne.
 
-The project collects public LinkedIn and JobUp offers around Geneva and Lausanne as well as the État de Genève RSS job feed, extracts useful details, splits descriptions into paragraphs, computes embeddings, stores everything in a shared database, and compares a PDF resume against the closest opportunities.
+The project collects public LinkedIn, Indeed, and JobUp offers around Geneva and Lausanne as well as the État de Genève RSS job feed, extracts useful details, splits descriptions into paragraphs, computes embeddings, stores everything in a shared database, and compares a PDF resume against the closest opportunities.
 
 ![Capture](/docs/images/Capture.png)
 
@@ -31,7 +31,7 @@ The project collects public LinkedIn and JobUp offers around Geneva and Lausanne
 
 ## 🎯 Objective of the project
 
-Automate public LinkedIn, JobUp, and État de Genève job collection and accelerate semantic matching between a resume and recent opportunities.
+Automate public LinkedIn, Indeed, JobUp, and État de Genève job collection and accelerate semantic matching between a resume and recent opportunities.
 
 ## 👥 Target audience
 
@@ -50,7 +50,7 @@ Automate public LinkedIn, JobUp, and État de Genève job collection and acceler
   - `LICENSE.md`
   - `SECURITY.md`
 - A Streamlit interface via [`streamlit_app.py`](/Users/gauthier/Desktop/cron_job/streamlit_app.py)
-- Airflow orchestration for LinkedIn, JobUp, and État de Genève via the `dags/` directory
+- Airflow orchestration for LinkedIn, Indeed, JobUp, and État de Genève via the `dags/` directory
 - A Python application layer in [`src/job_matcher/`](/Users/gauthier/Desktop/cron_job/src/job_matcher)
 - LinkedIn search configuration in [`config/linkedin_searches.json`](/Users/gauthier/Desktop/cron_job/config/linkedin_searches.json)
 
@@ -76,6 +76,8 @@ cron_job/
 ├── dags/
 │   ├── etat_geneve_jobs_ingestion.py
 │   ├── etat_geneve_jobs_ingestion_startup.py
+│   ├── indeed_jobs_ingestion.py
+│   ├── indeed_jobs_ingestion_startup.py
 │   ├── jobup_jobs_ingestion.py
 │   ├── jobup_jobs_ingestion_startup.py
 │   ├── linkedin_jobs_ingestion.py
@@ -85,6 +87,7 @@ cron_job/
 ├── static/
 │   └── source-icons/
 │       ├── etat-geneve.png
+│       ├── indeed.png
 │       ├── jobup.png
 │       └── linkedin.png
 ├── src/
@@ -95,6 +98,7 @@ cron_job/
 │       ├── database.py
 │       ├── embeddings.py
 │       ├── etat_geneve.py
+│       ├── indeed.py
 │       ├── jobup.py
 │       ├── linkedin.py
 │       ├── models.py
@@ -171,7 +175,9 @@ Default Airflow credentials from `.env.example`:
 
 ### Airflow startup DAG
 
-The repository includes `linkedin_jobs_ingestion_startup`, `etat_geneve_jobs_ingestion_startup`, and `jobup_jobs_ingestion_startup` for one ingestion run per source and per Airflow environment startup. The scheduled `jobup_jobs_ingestion` DAG runs every 15 minutes; both JobUp DAGs query Geneva (`regionIds=34`) and Lausanne (`regionIds=55`) separately.
+The repository includes `linkedin_jobs_ingestion_startup`, `etat_geneve_jobs_ingestion_startup`, `jobup_jobs_ingestion_startup`, and `indeed_jobs_ingestion_startup` for one ingestion run per source and per Airflow environment startup. The scheduled JobUp and Indeed DAGs run every 15 minutes. Both Indeed DAGs search Geneva and Lausanne separately within 25 km, deduplicate shared results, and collect each offer detail once. The Indeed startup DAG covers `[local midnight, run start)`, while the scheduled DAG uses a 20-minute effective window so consecutive runs overlap by five minutes.
+
+Indeed collection uses `MAX_JOBS_PER_SEARCH` as an explicit truncation guard. `MAX_DETAIL_PAGES=0` keeps detail collection exhaustive; a positive value applies the configured limit.
 
 - All startup DAGs use `schedule=None`, so they are not scheduled by Airflow and remain manually triggerable.
 - This replaces `schedule="@once"`, which only fires once for a DAG as long as a prior `DagRun` already exists.
@@ -180,7 +186,7 @@ The repository includes `linkedin_jobs_ingestion_startup`, `etat_geneve_jobs_ing
 
 Startup trigger environment variables:
 
-- `STARTUP_DAG_IDS`: comma-separated startup DAG IDs; defaults to the LinkedIn and État de Genève startup DAGs
+- `STARTUP_DAG_IDS`: comma-separated startup DAG IDs; defaults to all four source startup DAGs
 - `STARTUP_DAG_MAX_ATTEMPTS`: maximum retry attempts while waiting for Airflow and DAG discovery
 - `STARTUP_DAG_RETRY_DELAY`: delay in seconds between retries
 - `AIRFLOW_STARTUP_ID`: optional shared logical startup identifier used to deduplicate concurrent startup-trigger processes against the same Airflow metadata database
@@ -199,23 +205,27 @@ airflow dags trigger \
 airflow dags trigger \
     --run-id "manual__$(date -u +%Y%m%dT%H%M%SZ)" \
     jobup_jobs_ingestion_startup
+
+airflow dags trigger \
+    --run-id "manual__$(date -u +%Y%m%dT%H%M%SZ)" \
+    indeed_jobs_ingestion_startup
 ```
 
 Diagnostics when the startup DAG does not run:
 
 - Check the logs of the `airflow-startup-trigger` service first.
 - Confirm `airflow db check` succeeds inside the Airflow containers.
-- Confirm `airflow dags list` shows both configured startup DAGs.
+- Confirm `airflow dags list` shows every configured startup DAG.
 - If the logs mention an existing startup claim, inspect the `startup_dag_triggers` table in the shared Airflow metadata database.
 
 Current idempotence notes for repeated startup runs:
 
-- LinkedIn and JobUp search results and État de Genève feed entries are deduplicated before persistence.
+- LinkedIn, Indeed, and JobUp search results and État de Genève feed entries are deduplicated before persistence.
 - Prepared offers are deduplicated on `final_url`.
 - Persistence skips existing `canonical_url` values already stored in Postgres and same-batch duplicates.
 - `persist_offers_step` commits in one database transaction, so partial writes from that step are rolled back on failure.
 - The current behavior is insert-idempotent, not a full refresh strategy: an already stored offer is skipped rather than updated if source content changes later.
-- Streamlit ranks both sources in one result set and displays the source of every offer.
+- Streamlit ranks all sources in one result set and displays the source-specific logo for every offer.
 
 ## 🥽 Security
 
@@ -239,7 +249,8 @@ Recommended:
 - **Python >= 3.11**
 - Dependencies listed in [requirements.txt](/Users/gauthier/Desktop/cron_job/requirements.txt)
 - PostgreSQL database with `pgvector` extension
-- Chromium installed through Playwright
+- Chromium installed through Playwright and reused by SeleniumBase for Indeed collection
+- Xvfb available in the Docker image for headed browser sessions in Airflow
 
 ## 🧪 Project Status
 

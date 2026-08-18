@@ -37,6 +37,7 @@ sys.modules["job_matcher.models"] = models_stub
 
 from job_matcher.pipeline import (
     _attach_title_embeddings,
+    collect_indeed_job_details_step,
     filter_existing_jobs_step,
     persist_offers_step,
 )
@@ -167,6 +168,55 @@ class FilterExistingJobsStepTests(unittest.TestCase):
         self.assertEqual(result["jobs_skipped"], 0)
         written_df = mock_write_dataframe.call_args.args[0]
         self.assertTrue(written_df.empty)
+
+
+class IndeedDetailStepTests(unittest.TestCase):
+    @patch("job_matcher.pipeline._write_dataframe")
+    @patch("job_matcher.pipeline._read_dataframe")
+    def test_raises_after_writing_diagnostics_when_every_detail_fails(
+        self,
+        mock_read_dataframe,
+        mock_write_dataframe,
+    ) -> None:
+        jobs_df = pd.DataFrame(
+            {
+                "job_id": ["failed-1"],
+                "url": ["https://ch-fr.indeed.com/viewjob?jk=failed-1"],
+            }
+        )
+        details_df = pd.DataFrame(
+            {
+                "canonical_url": [
+                    "https://ch-fr.indeed.com/viewjob?jk=failed-1"
+                ],
+                "detail_status": ["error"],
+                "detail_error": ["blocked"],
+            }
+        )
+        mock_read_dataframe.return_value = jobs_df
+
+        async def failed_details(*_args, **_kwargs):
+            return details_df
+
+        with patch(
+            "job_matcher.pipeline.collect_indeed_job_details",
+            failed_details,
+        ), patch(
+            "job_matcher.pipeline.get_run_directory",
+            return_value=Path("runtime/airflow/run-1"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "failed for every"):
+                collect_indeed_job_details_step(
+                    "run-1",
+                    "runtime/airflow/run-1/indeed_jobs.pkl",
+                )
+
+        written_df, written_path = mock_write_dataframe.call_args.args
+        self.assertIs(written_df, details_df)
+        self.assertEqual(
+            written_path,
+            Path("runtime/airflow/run-1/indeed_details.pkl"),
+        )
 
 
 class PersistOffersStepTests(unittest.TestCase):
