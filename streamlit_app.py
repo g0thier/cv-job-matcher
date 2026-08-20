@@ -16,6 +16,12 @@ SOURCE_ICONS = {
     "jobup": "app/static/source-icons/jobup.png",
     "indeed": "app/static/source-icons/indeed.png",
 }
+SORT_ORDER_OPTIONS = {
+    "Title Relevance": "relevance",
+    "Job Description Relevance": "text_score_final",
+    "Newest first": "newest",
+    "Title A–Z": "title_asc",
+}
 
 
 def clean_company_name(company: str | None) -> str:
@@ -36,7 +42,7 @@ st.title("CV Job Matcher")
 st.caption("Upload a CV PDF, pick a time window, and retrieve the closest job offers from the database.")
 
 uploaded_file = st.file_uploader("CV PDF", type=["pdf"])
-filters_col, limit_col = st.columns(2)
+filters_col, limit_col, sort_col = st.columns(3)
 with filters_col:
     lookback_hours = st.slider("Lookback window (hours)", min_value=1, max_value=168, value=24)
 with limit_col:
@@ -46,6 +52,13 @@ with limit_col:
         default=25,
         selection_mode="single",
     )
+with sort_col:
+    sort_order_label = st.selectbox(
+        "Sort offers by",
+        options=list(SORT_ORDER_OPTIONS),
+        index=0,
+    )
+    sort_order = SORT_ORDER_OPTIONS[sort_order_label]
 
 if st.button("Find matching offers", type="primary", use_container_width=True):
     if uploaded_file is None:
@@ -57,6 +70,7 @@ if st.button("Find matching offers", type="primary", use_container_width=True):
                     uploaded_file.getvalue(),
                     lookback_hours=lookback_hours,
                     result_limit=result_limit,
+                    sort_order=sort_order,
                 )
             except Exception as exc:
                 st.exception(exc)
